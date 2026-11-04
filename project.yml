@@ -1,0 +1,65 @@
+name: LinYuIOS
+options:
+  bundleIdPrefix: org.linyu.prototype
+  deploymentTarget:
+    iOS: "16.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    TARGETED_DEVICE_FAMILY: "1"
+    CODE_SIGN_STYLE: Automatic
+    GENERATE_INFOPLIST_FILE: NO
+    SWIFT_STRICT_CONCURRENCY: minimal
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    LINYU_APP_GROUP: group.org.linyu.prototype
+targets:
+  LinYuIOS:
+    type: application
+    platform: iOS
+    scheme:
+      testTargets:
+        - LinYuIOSTests
+    sources:
+      - path: LinYuIOS
+        excludes:
+          - Info.plist
+          - LinYuIOS.entitlements
+      - path: Shared
+    dependencies:
+      - target: LinYuWidgets
+        embed: true
+    settings:
+      base:
+        INFOPLIST_FILE: LinYuIOS/Info.plist
+        CODE_SIGN_ENTITLEMENTS: LinYuIOS/LinYuIOS.entitlements
+        PRODUCT_BUNDLE_IDENTIFIER: org.linyu.prototype.app
+        PRODUCT_NAME: LinYuIOS
+  LinYuIOSTests:
+    type: bundle.unit-test
+    platform: iOS
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: org.linyu.prototype.app.tests
+    sources:
+      - path: LinYuIOSTests
+      - path: CoreTests
+    dependencies:
+      - target: LinYuIOS
+  LinYuWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: LinYuWidgets
+        excludes:
+          - Info.plist
+          - LinYuWidgets.entitlements
+      - path: Shared
+    settings:
+      base:
+        INFOPLIST_FILE: LinYuWidgets/Info.plist
+        CODE_SIGN_ENTITLEMENTS: LinYuWidgets/LinYuWidgets.entitlements
+        PRODUCT_BUNDLE_IDENTIFIER: org.linyu.prototype.app.widgets
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
