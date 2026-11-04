@@ -1,14 +1,18 @@
 name: Build LiveContainer IPA
 on:
   workflow_dispatch:
-  push:
-    branches: ['build/livecontainer']
-    paths: ['LinYuIOS/**', 'LinYuIOSTests/**', 'CoreTests/**', 'Shared/**', 'scripts/**', 'Package.swift', 'project-livecontainer.yml', '.github/workflows/livecontainer-ipa.yml']
+    inputs:
+      runner:
+        description: Standard macOS build image
+        type: choice
+        required: true
+        default: macos-26
+        options: [macos-26, macos-26-intel, macos-15, macos-15-intel]
 permissions:
   contents: read
 jobs:
   build:
-    runs-on: macos-15-intel
+    runs-on: ${{ inputs.runner || 'macos-26' }}
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
