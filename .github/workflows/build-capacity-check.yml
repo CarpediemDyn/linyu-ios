@@ -1,6 +1,9 @@
 name: Check build capacity
 on:
   workflow_dispatch:
+  push:
+    branches: ['build/livecontainer']
+    paths: ['.github/workflows/build-capacity-check.yml']
 permissions:
   contents: read
 jobs:
