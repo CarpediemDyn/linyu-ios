@@ -6,13 +6,40 @@ on:
         description: Standard macOS build image
         type: choice
         required: true
-        default: macos-26
+        default: macos-26-intel
         options: [macos-26, macos-26-intel, macos-15, macos-15-intel]
 permissions:
   contents: read
 jobs:
+  wait_for_service:
+    name: Wait for GitHub Actions recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Wait up to 45 minutes for the official Actions status
+        run: |
+          python3 -u - <<'PY'
+          import json, time, urllib.request
+          deadline = time.monotonic() + 45 * 60
+          while time.monotonic() < deadline:
+              try:
+                  request = urllib.request.Request('https://www.githubstatus.com/api/v2/summary.json', headers={'Cache-Control': 'no-cache', 'User-Agent': 'LinYu-build-status'})
+                  with urllib.request.urlopen(request, timeout=15) as response:
+                      summary = json.load(response)
+                  state = next((item['status'] for item in summary['components'] if item['name'] == 'Actions'), 'unknown')
+                  print('Official GitHub Actions status:', state, flush=True)
+                  if state == 'operational':
+                      print('Status is operational; continue to one Mac build attempt.', flush=True)
+                      break
+              except Exception as error:
+                  print('Could not read public status:', error, flush=True)
+              time.sleep(60)
+          else:
+              raise SystemExit('Recovery wait expired; no Mac build was started.')
+          PY
   build:
-    runs-on: ${{ inputs.runner || 'macos-26' }}
+    needs: wait_for_service
+    runs-on: ${{ inputs.runner || 'macos-26-intel' }}
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
@@ -63,3 +90,4 @@ jobs:
           path: work/ContainerTests.xcresult
           if-no-files-found: ignore
           retention-days: 7
+
