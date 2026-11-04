@@ -1,0 +1,21 @@
+name: Check build capacity
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test package validation on POSIX
+        run: python3 -m unittest discover -s scripts/tests -v
+      - name: Check available Swift core toolchain
+        run: |
+          if command -v swift >/dev/null 2>&1; then
+            swift --version
+            swift test
+          else
+            echo 'Swift is not installed on this diagnostic runner; core tests not executed.'
+          fi
