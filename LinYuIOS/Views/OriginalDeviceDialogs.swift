@@ -9,7 +9,9 @@ import SwiftUI
     private var cloudOrder: CloudActiveOrder? { model.currentCloud.first { $0.snCode == device.snCode } }
     private var active: Bool { bluetoothOrder != nil || cloudOrder != nil }
     var body: some View {
-        OriginalDeviceDetailContent(device: device, isActive: active, isOwner: true, busy: model.isBusy, bluetooth: Binding(get: { model.usesBluetooth(device) }, set: { model.setBluetooth($0, device: device) }), onConfirm: {
+        OriginalDeviceDetailContent(device: device, isActive: active, busy: model.isBusy,
+                                    availability: model.selectedDeviceAvailability,
+                                    bluetooth: Binding(get: { model.usesBluetooth(device) }, set: { model.setBluetooth($0, device: device) }), onConfirm: {
             if let bluetoothOrder { model.showShower = bluetoothOrder.id; onDismiss() }
             else if let cloudOrder { model.showCloudShower = cloudOrder.snCode; onDismiss() }
             else { onDismiss(); onStart(device) }
@@ -21,16 +23,18 @@ struct OriginalDeviceDetailContent: View {
     @Environment(\.linYuColors) private var colors
     let device: CampusDevice
     var isActive = false
-    var isOwner = true
     var busy = false
+    var availability: OriginalDeviceAvailability = .idle
     var bluetooth: Binding<Bool>? = nil
     let onConfirm: () -> Void
     let onDismiss: () -> Void
     private var typeTitle: String { device.isDrinkingWater ? (device.isHotWater ? "饮水（热水）" : "饮水（冷水）") : device.deviceName.hasPrefix("洗手台") ? "洗漱" : "沐浴" }
     private var typeName: String { device.isDrinkingWater ? "饮水机" : device.deviceName.hasPrefix("洗手台") ? "洗手台" : "热水器" }
-    private var canUse: Bool { (!isActive || isOwner) && !busy }
+    private var canUse: Bool { (isActive || (availability != .occupied && availability != .running)) && !busy }
     private var buttonTitle: String {
-        if isActive { return isOwner ? "恢复使用" : "他人使用中" }
+        if isActive { return "恢复使用" }
+        if availability == .occupied { return "他人使用中" }
+        if availability == .running { return "设备使用中" }
         return device.isDrinkingWater ? "开始接水" : "开始使用"
     }
     var body: some View {
@@ -45,7 +49,7 @@ struct OriginalDeviceDetailContent: View {
                     OriginalDeviceDetailLine(label: "SN 码", value: device.snCode)
                     OriginalDeviceDetailLine(label: "MAC 地址", value: device.macAddress)
                     OriginalDeviceDetailLine(label: "预扣金额", value: device.withholdMoney.map { "¥" + OriginalFormatting.money($0) } ?? "金额未知")
-                    OriginalDeviceDetailLine(label: "状态", value: isActive ? "使用中" : "空闲")
+                    OriginalDeviceDetailLine(label: "状态", value: isActive ? "使用中" : availability.label)
                     if device.needsBluetoothControl {
                         Text("此设备通过手机蓝牙直连控制：开启后请留在设备旁，走远会断开连接、无法关闭。")
                             .font(LinYuType.font(13)).lineSpacing(5).foregroundStyle(colors.textSecondary).padding(.top, 10)

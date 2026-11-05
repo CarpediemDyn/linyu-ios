@@ -219,6 +219,17 @@ import XCTest
         XCTAssertEqual(manager.active.first, first)
     }
 
+    func testDiscoveryReportsOccupiedWithoutAdoptingAnotherAccountsOrder() async {
+        let (api, session) = fixture([
+            Step(using, json: ["success": true, "data": ["orderNo": "other-account", "isOwner": false]])
+        ])
+        defer { session.invalidateAndCancel() }
+        let manager = controller(api, preferences())
+        let status = await manager.discover(snCode: "one", name: "A", mac: "AA", session: auth)
+        XCTAssertEqual(status, .occupied)
+        XCTAssertTrue(manager.active.isEmpty)
+    }
+
     func testConsumeParserExcludesBalancesAndRetainsUnknownVersusZero() async {
         XCTAssertNil(CloudShowerController.consumeYuan(QzxyResponse(json: ["success": true, "data": ["walletMoney": 5000, "preDeductMoney": 1000]])))
         XCTAssertEqual(CloudShowerController.consumeYuan(QzxyResponse(json: ["data": ["consumeMoney": 0]])), 0)

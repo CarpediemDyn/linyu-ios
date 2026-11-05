@@ -18,6 +18,7 @@ import WidgetKit
     @Published var unpaid: [CampusUnpaidBill] = []
     @Published var nearby: [UUID: CampusDevice] = [:]
     @Published var selectedDevice: CampusDevice?
+    @Published private(set) var selectedDeviceAvailability: OriginalDeviceAvailability = .unknown
     @Published var selectedPeripheral: UUID?
     @Published var showShower: UUID?
     @Published var showCloudShower: String?
@@ -198,7 +199,12 @@ import WidgetKit
             let payload = try await ble.exchange(0x23, payload: Data([0]))
             guard let identity = WaterProtocolIdentity.state(payload), let device = try await cachedDevice(identity.macAddress, session: session) else { throw WaterError.invalid("没有查到这台设备的台账") }
             guard generation == token else { return }
-            nearby[meter.id] = device; if showDetail { selectedDevice = device }; selectedPeripheral = meter.id
+            nearby[meter.id] = device
+            if showDetail {
+                selectedDeviceAvailability = OriginalDeviceAvailability(bleState: BleDeviceState.parse(payload)?.state)
+                selectedDevice = device
+            }
+            selectedPeripheral = meter.id
             setBluetooth(true, device: device)
             _ = await transactions.associate(device: try device.ledgerDevice, session: session)
             guard generation == token else { return }
@@ -212,8 +218,12 @@ import WidgetKit
         do {
             guard let device = try await cachedDevice(sn, session: session) else { throw WaterError.invalid("没有查到二维码对应的设备") }
             guard generation == token else { return }
+            selectedDeviceAvailability = .unknown
             selectedDevice = device; selectedPeripheral = nearby.first(where: { $0.value.deviceId == device.deviceId })?.key
-            if !usesBluetooth(device) { await cloud.discover(snCode: device.snCode, name: device.deviceName, mac: device.macAddress, session: session) }
+            if !usesBluetooth(device) {
+                let availability = await cloud.discover(snCode: device.snCode, name: device.deviceName, mac: device.macAddress, session: session)
+                if generation == token, selectedDevice?.snCode == device.snCode { selectedDeviceAvailability = availability }
+            }
         } catch { if generation == token { report(error) } }
     }
 

@@ -101,6 +101,27 @@ struct CampusCodeCandidate: Codable, Equatable {
 }
 
 /// Optional server metadata stays optional; smallTypeId alone does not select Bluetooth.
+enum OriginalDeviceAvailability: Equatable {
+    case unknown, idle, running, occupied, pending
+
+    init(bleState: UInt8?) {
+        switch bleState {
+        case 0: self = .idle
+        case 1: self = .running
+        case 3, 6: self = .pending
+        default: self = .unknown
+        }
+    }
+    var label: String {
+        switch self {
+        case .unknown: return "待确认"
+        case .idle: return "空闲"
+        case .running, .occupied: return "使用中"
+        case .pending: return "有待结算记录"
+        }
+    }
+}
+
 struct CampusDevice: Codable, Equatable, Identifiable {
     var deviceId: String = ""
     var deviceName: String = ""

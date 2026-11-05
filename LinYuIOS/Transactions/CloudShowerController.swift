@@ -204,18 +204,22 @@ enum CloudShowerError: LocalizedError {
     }
 
     /// Query at startup after a use-code/physical device is resolved. Does not issue an open request.
-    func discover(snCode: String, name: String, mac: String, session: QzxySession) async {
+    @discardableResult
+    func discover(snCode: String, name: String, mac: String, session: QzxySession) async -> OriginalDeviceAvailability {
         let key = use(session)
-        guard !snCode.isEmpty, !busy.contains(snCode) else { return }
+        guard !snCode.isEmpty, !busy.contains(snCode) else { return .unknown }
         do {
             let response = try await query(snCode, session)
             try check(key)
             if running(response) == true {
-                if response.data?["isOwner"] as? Bool == false { lastMessage = "该设备正在被他人使用"; return }
+                if response.data?["isOwner"] as? Bool == false { lastMessage = "该设备正在被他人使用"; return .occupied }
                 ensure(snCode: snCode, name: name, mac: mac, orderNo: text(response.data?["orderNo"]) ?? "",
                        auto: integer(response.data?["autoDisConTime"]) ?? 0)
+                return .running
             }
+            if running(response) == false { return .idle }
         } catch { if accountKey == key { lastMessage = error.localizedDescription } }
+        return .unknown
     }
 
     func refresh(session: QzxySession) async {
