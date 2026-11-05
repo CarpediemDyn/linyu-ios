@@ -65,7 +65,6 @@ import XCTest
             .background(palette.background)
             .environment(\.linYuColors, palette)
             .environment(\.colorScheme, dark ? .dark : .light)
-            .environment(\.accessibilityReduceMotion, true)
         let renderer = ImageRenderer(content: canvas)
         renderer.scale = 2
         let image = try XCTUnwrap(renderer.uiImage, "Missing visual attachment: " + name)
