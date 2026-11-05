@@ -21,8 +21,7 @@ extension EnvironmentValues {
     @StateObject private var reveal = LinYuThemeReveal()
     @State private var displayDark = false
     @State private var oldDark = false
-    @State private var progress: Double = 0
-    @State private var generation = UUID()
+    @State private var revealStart: Date?
     private let content: Content
     init(preferences: OriginalPreferences, @ViewBuilder content: () -> Content) {
         self.preferences = preferences; self.content = content()
@@ -33,39 +32,49 @@ extension EnvironmentValues {
     }
     var body: some View {
         GeometryReader { geometry in
-            ZStack {
+            TimelineView(.animation(paused: revealStart == nil)) { timeline in
+                let progress = revealStart.map { Self.easedProgress(timeline.date.timeIntervalSince($0) / 0.65) } ?? 1
+                let dark = revealStart != nil && progress < 0.2 ? oldDark : displayDark
+                let palette = LinYuPalette(isDark: dark, customAccent: preferences.homeThemeRGB)
+                ZStack {
                 content
-                    .environment(\.linYuColors, LinYuPalette(isDark: displayDark, customAccent: preferences.homeThemeRGB))
+                    .environment(\.linYuColors, palette)
                     .environment(\.linYuThemeReveal, reveal)
-                    .tint(LinYuPalette(isDark: displayDark, customAccent: preferences.homeThemeRGB).accent)
-                if reveal.isAnimating {
+                    .tint(palette.accent)
+                if revealStart != nil {
                     LinYuRevealOverlay(progress: progress, origin: reveal.origin,
                                        size: geometry.size, color: LinYuPalette(isDark: oldDark).background)
                         .ignoresSafeArea().allowsHitTesting(false).accessibilityHidden(true)
                 }
-            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .preferredColorScheme(preferences.theme == "system" ? nil : (dark ? .dark : .light))
+            }
         }
-        .preferredColorScheme(displayDark ? .dark : .light)
+        .coordinateSpace(name: "linyu.theme")
         .onAppear { displayDark = requestedDark }
         .onChange(of: preferences.theme) { _ in beginReveal() }
-        .onChange(of: systemScheme) { _ in if preferences.theme == "system" { beginReveal() } }
+        .onChange(of: systemScheme) { _ in if preferences.theme == "system" { displayDark = requestedDark } }
+        .task(id: revealStart) {
+            guard revealStart != nil else { return }
+            do { try await Task.sleep(nanoseconds: 650_000_000) } catch { return }
+            revealStart = nil; reveal.isAnimating = false
+        }
     }
     private func beginReveal() {
         guard !reveal.isAnimating, displayDark != requestedDark else { return }
-        let token = UUID(); generation = token
-        let target = requestedDark
-        oldDark = displayDark; progress = 0; reveal.isAnimating = true
-        Task { @MainActor in
-            await Task.yield()
-            guard generation == token else { return }
-            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.65)) { progress = 1 }
-            try? await Task.sleep(nanoseconds: 130_000_000)
-            guard generation == token else { return }
-            displayDark = target
-            try? await Task.sleep(nanoseconds: 520_000_000)
-            guard generation == token else { return }
-            reveal.isAnimating = false
+        oldDark = displayDark; displayDark = requestedDark
+        reveal.isAnimating = true; revealStart = .now
+    }
+    private static func easedProgress(_ time: Double) -> Double {
+        let target = min(1, max(0, time))
+        var lower = 0.0, upper = 1.0
+        for _ in 0..<16 {
+            let t = (lower + upper) / 2, u = 1 - t
+            let x = 1.2 * u * u * t + 0.6 * u * t * t + t * t * t
+            if x < target { lower = t } else { upper = t }
         }
+        let t = (lower + upper) / 2
+        return t * t * (3 - 2 * t)
     }
 }
 
@@ -108,7 +117,7 @@ private struct LinYuThemeFrameKey: PreferenceKey {
         } label: {
             Text(colors.isDark ? "🌙" : "☀️").font(LinYuType.font(20)).frame(width: 40, height: 40)
         }.buttonStyle(.plain).accessibilityLabel("切换深浅主题")
-            .background(GeometryReader { proxy in Color.clear.preference(key: LinYuThemeFrameKey.self, value: proxy.frame(in: .global)) })
+            .background(GeometryReader { proxy in Color.clear.preference(key: LinYuThemeFrameKey.self, value: proxy.frame(in: .named("linyu.theme"))) })
             .onPreferenceChange(LinYuThemeFrameKey.self) { frame = $0 }
     }
 }

@@ -195,7 +195,9 @@ struct LinYuPillNavigation: View {
                         LinYuIcon(name: icons[index], size: 16)
                         Text(titles[index]).font(LinYuType.font(11, weight: .medium))
                     }.foregroundStyle(selection == index ? colors.onAccent : Color(linYuHex: colors.isDark ? 0x94A3B8 : 0x64748B))
+                        .animation(.easeInOut(duration: 0.2), value: selection)
                         .scaleEffect(selection == index ? 1.04 : 1)
+                        .animation(.interpolatingSpring(stiffness: 400, damping: 28.8), value: selection)
                         .frame(width: 84, height: 42)
                         .background {
                             if selection == index {

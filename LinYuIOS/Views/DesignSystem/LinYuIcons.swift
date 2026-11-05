@@ -16,8 +16,8 @@ struct LinYuDeviceGlyph: View {
     var body: some View {
         Group {
             switch emoji {
-            case "🚿": LinYuIcon(name: "ic_device_shower", size: size)
-            case "🪥": LinYuIcon(name: "ic_device_sink", size: size)
+            case "🚿": LinYuIcon(name: "ic_device_shower", size: size).foregroundStyle(.white)
+            case "🪥": LinYuIcon(name: "ic_device_sink", size: size).foregroundStyle(.white)
             default: Text(emoji).font(LinYuType.font(size))
             }
         }
