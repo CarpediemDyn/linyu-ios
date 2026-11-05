@@ -293,6 +293,18 @@ import XCTest
         XCTAssertEqual(count, 0)
     }
 
+    @MainActor private final class LoginTestStorage {
+        var data: Data?
+        var rejectsWrites = false
+        var storage: AuthManager.SessionStorage {
+            AuthManager.SessionStorage(load: { self.data }, save: { data in
+                guard !self.rejectsWrites else { return false }
+                self.data = data
+                return true
+            }, delete: { self.data = nil })
+        }
+    }
+
     func testMockLoginThroughRealHomeWithCachedBills() async throws {
         let project = "9"
         let account = UUID().uuidString
@@ -317,7 +329,8 @@ import XCTest
             return try self.response(["success": true, "data": NSNull()])
         }
         let network = QzxyAPI(session: fixture)
-        let auth = AuthManager(api: network, storageKey: "mock-home-" + account)
+        let storage = LoginTestStorage()
+        let auth = AuthManager(api: network, storage: storage.storage)
         let cloud = CloudShowerController(api: network, mqttEnabled: false)
         let model = OriginalAppModel(authentication: auth, network: network, cloudController: cloud)
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
