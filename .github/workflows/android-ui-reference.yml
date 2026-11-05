@@ -1,0 +1,37 @@
+name: Capture official Android UI reference
+on:
+  workflow_dispatch:
+  push:
+    branches: [ui/android-parity]
+    paths: ['.github/workflows/android-ui-reference.yml', 'scripts/capture_android_reference.py']
+permissions:
+  contents: read
+jobs:
+  official-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify release APK
+        run: |
+          mkdir -p work/android-reference
+          curl --fail --silent --show-error --location --retry 3 \
+            https://github.com/yehu-imei/linyu/releases/download/v3.1.0/linyu-v3.1.0.apk \
+            --output work/android-reference/linyu.apk
+          echo '5212f96c856b9d91388511d33533d8122dd5d1481863bd671909602a599163aa  work/android-reference/linyu.apk' | sha256sum --check
+      - name: Enable emulator acceleration
+        run: sudo chmod a+rw /dev/kvm
+      - name: Render login from unchanged APK
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 30
+          target: google_apis
+          arch: x86_64
+          profile: pixel_5
+          script: python3 scripts/capture_android_reference.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: LinYu-Android-v3.1.0-Reference
+          path: work/android-reference/*.png
+          if-no-files-found: warn

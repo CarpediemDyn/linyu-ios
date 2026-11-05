@@ -64,6 +64,18 @@ jobs:
             -configuration Debug -sdk iphonesimulator -destination "id=$IOS_SIMULATOR_UDID" \
             -derivedDataPath work/SimulatorBuild -resultBundlePath work/ContainerTests.xcresult \
             CODE_SIGNING_ALLOWED=NO test
+      - name: Export screenshots from XCTest
+        if: always()
+        run: |
+          if [ -d work/ContainerTests.xcresult ]; then
+            xcrun xcresulttool export attachments --path work/ContainerTests.xcresult --output-path work/visual-checks
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: LinYu-iOS-Visual-Checks
+          path: work/visual-checks
+          if-no-files-found: warn
       - name: Build physical iPhone app
         run: |
           xcodebuild -project LinYuLiveContainer.xcodeproj -scheme LinYuIOS \

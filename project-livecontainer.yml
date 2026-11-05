@@ -18,7 +18,7 @@ targets:
     type: application
     platform: iOS
     scheme:
-      testTargets: [LinYuIOSTests]
+      testTargets: [LinYuIOSTests, LinYuUISmokeTests]
     sources:
       - path: LinYuIOS
         excludes: [Info.plist, LinYuIOS.entitlements]
@@ -41,5 +41,15 @@ targets:
     sources:
       - path: LinYuIOSTests
       - path: CoreTests
+    dependencies:
+      - target: LinYuIOS
+  LinYuUISmokeTests:
+    type: bundle.ui-testing
+    platform: iOS
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: org.linyu.prototype.livecontainer.uitests
+    sources: [LinYuUISmokeTests]
     dependencies:
       - target: LinYuIOS
