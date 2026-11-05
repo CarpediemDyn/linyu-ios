@@ -304,8 +304,8 @@ import XCTest
             ])
         }
         defer { fixture.invalidateAndCancel() }
-        let key = "test-login-" + UUID().uuidString
-        let manager = AuthManager(api: QzxyAPI(session: fixture), storageKey: key)
+        let storage = LoginTestStorage()
+        let manager = AuthManager(api: QzxyAPI(session: fixture), storage: storage.storage)
         defer { manager.logout() }
 
         let trace = LatencyTrace("mock_login_session", report: { print($0) })
@@ -315,13 +315,13 @@ import XCTest
         await fulfillment(of: [started], timeout: 3)
         XCTAssertTrue(manager.loading)
         XCTAssertNil(manager.session)
-        XCTAssertNil(KeychainStore.get(key))
+        XCTAssertNil(storage.data)
         await manager.login(phone: "13800138000", secret: "654321", usePassword: false)
         XCTAssertTrue(manager.loading)
         await login.value
         XCTAssertFalse(manager.loading)
         XCTAssertNotNil(manager.session)
-        XCTAssertNotNil(KeychainStore.get(key))
+        XCTAssertNotNil(storage.data)
         manager.homeAppeared()
     }
 
@@ -330,14 +330,42 @@ import XCTest
             try self.response(["success": false, "errorMessage": "验证码错误"])
         }
         defer { fixture.invalidateAndCancel() }
-        let key = "test-login-" + UUID().uuidString
-        let manager = AuthManager(api: QzxyAPI(session: fixture), storageKey: key)
+        let storage = LoginTestStorage()
+        let manager = AuthManager(api: QzxyAPI(session: fixture), storage: storage.storage)
         defer { manager.logout() }
         await manager.login(phone: "13800138000", secret: "123456", usePassword: false)
         XCTAssertNil(manager.session)
-        XCTAssertNil(KeychainStore.get(key))
+        XCTAssertNil(storage.data)
         XCTAssertFalse(manager.loading)
         XCTAssertTrue(manager.activity.contains("验证码错误"))
+    }
+
+    func testFailedSecureStorageDoesNotPublishValidatedLogin() async {
+        let fixture = fixtureSession { _ in
+            try self.response(["success": true, "data": ["loginCode": "fixture", "userId": 7,
+                                                           "userAccount": ["accountId": 8, "projectId": 9]]])
+        }
+        defer { fixture.invalidateAndCancel() }
+        let storage = LoginTestStorage()
+        storage.rejectsWrites = true
+        let manager = AuthManager(api: QzxyAPI(session: fixture), storage: storage.storage)
+        await manager.login(phone: "13800138000", secret: "123456", usePassword: false)
+        XCTAssertNil(manager.session)
+        XCTAssertNil(storage.data)
+        XCTAssertFalse(manager.loading)
+        XCTAssertTrue(manager.activity.contains("会话未能安全保存"))
+    }
+
+    @MainActor private final class LoginTestStorage {
+        var data: Data?
+        var rejectsWrites = false
+        var storage: AuthManager.SessionStorage {
+            AuthManager.SessionStorage(load: { self.data }, save: { data in
+                guard !self.rejectsWrites else { return false }
+                self.data = data
+                return true
+            }, delete: { self.data = nil })
+        }
     }
 
     func testMockLoginThroughRealHomeWithCachedBills() async throws {
@@ -364,7 +392,8 @@ import XCTest
             return try self.response(["success": true, "data": NSNull()])
         }
         let network = QzxyAPI(session: fixture)
-        let auth = AuthManager(api: network, storageKey: "mock-home-" + account)
+        let storage = LoginTestStorage()
+        let auth = AuthManager(api: network, storage: storage.storage)
         let cloud = CloudShowerController(api: network, mqttEnabled: false)
         let model = OriginalAppModel(authentication: auth, network: network, cloudController: cloud)
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)

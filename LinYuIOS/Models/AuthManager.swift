@@ -10,7 +10,13 @@ import Combine
     @Published var transactionInProgress = false
 
     private let api: QzxyAPI
-    private let storageKey: String
+    struct SessionStorage {
+        var load: () -> Data?
+        var save: (Data) -> Bool
+        var delete: () -> Void
+    }
+
+    private let storage: SessionStorage
     private var loginTrace: LatencyTrace?
     private(set) var isPublishingLogin = false
 
@@ -19,10 +25,14 @@ import Combine
         loginTrace = nil
     }
 
-    init(api: QzxyAPI? = nil, storageKey: String = "user-session") {
+    init(api: QzxyAPI? = nil, storage: SessionStorage? = nil) {
         self.api = api ?? QzxyAPI()
-        self.storageKey = storageKey
-        if let data = KeychainStore.get(storageKey) {
+        self.storage = storage ?? SessionStorage(
+            load: { KeychainStore.get("user-session") },
+            save: { KeychainStore.put($0, for: "user-session") },
+            delete: { KeychainStore.delete("user-session") }
+        )
+        if let data = self.storage.load() {
             session = try? JSONDecoder().decode(QzxySession.self, from: data)
         }
     }
@@ -40,7 +50,9 @@ import Combine
             let result: QzxySession = usePassword
                 ? try await api.loginWithPassword(phone: phone, password: secret, trace: trace)
                 : try await api.loginWithSMS(phone: phone, code: secret, trace: trace)
-            guard let data = try? JSONEncoder().encode(result), KeychainStore.put(data, for: storageKey) else {
+            trace?.mark("session_save_started")
+            guard let data = try? JSONEncoder().encode(result), storage.save(data) else {
+                trace?.mark("session_save_failed")
                 throw QzxyError.server("登录成功，但会话未能安全保存")
             }
             trace?.mark("session_saved")
@@ -74,7 +86,7 @@ import Combine
     func logout() {
         guard !transactionInProgress else { activity = "用水操作处理中，请等待当前操作结束"; return }
         loginTrace = nil
-        KeychainStore.delete(storageKey)
+        storage.delete()
         session = nil
         activity = "已退出登录"
         walletText = ""
@@ -83,7 +95,7 @@ import Combine
 
     func replaceSession(_ value: QzxySession) throws {
         let data = try JSONEncoder().encode(value)
-        guard KeychainStore.put(data, for: storageKey) else { throw WaterError.storage }
+        guard storage.save(data) else { throw WaterError.storage }
         session = value
     }
 

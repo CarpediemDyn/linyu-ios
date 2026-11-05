@@ -253,6 +253,7 @@ import WidgetKit
             trace.mark("seen_to_tap_\(max(0, Int(Date().timeIntervalSince(discovered.lastSeen) * 1_000)))ms")
         }
         if let cached = meterDisplay?.device(for: meter.id) {
+            setBluetooth(true, device: cached)
             display(cached, peripheral: meter.id, availability: .unknown, showDetail: showDetail)
             trace.finish("display_cache_hit")
             return
@@ -335,6 +336,7 @@ import WidgetKit
         let expected = Set(OriginalFormatting.macLookupVariants(device.realMac ?? device.macAddress).compactMap(LedgerDevice.normalizeMAC))
         for id in ids {
             try Task.checkCancellation()
+            guard generation == token else { throw CancellationError() }
             do {
                 try await ble.connectForTransaction(to: id)
                 let proof = try await transactions.readAssociation()
