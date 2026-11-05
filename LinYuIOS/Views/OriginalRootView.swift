@@ -5,212 +5,164 @@ import Charts
     @StateObject private var model = OriginalAppModel()
     @Environment(\.scenePhase) private var scenePhase
     @State private var page = 0
+    @State private var direction = 1
     @State private var scanner = false
-    @Namespace private var capsule
+    @State private var inSettings = false
+    @State private var opening = false
+    @State private var sessionNotice = false
+    private enum Dialog { case session, automatic, opening, retry, failure, device }
+    private var dialog: Dialog? {
+        if sessionNotice { return .session }
+        if model.automaticFinish != nil { return .automatic }
+        if opening { return .opening }
+        if model.pendingBluetoothFallback != nil { return .retry }
+        if model.startFailure != nil { return .failure }
+        if model.selectedDevice != nil { return .device }
+        return nil
+    }
+    private var canDismissDialog: Bool { dialog != .session && dialog != .opening && dialog != .automatic && !model.isBusy }
+    private var tab: Binding<Int> {
+        Binding(get: { page }, set: { next in
+            direction = next > page ? 1 : -1
+            inSettings = false
+            page = next
+        })
+    }
     var body: some View {
-        ZStack(alignment: .bottom) {
-            OriginalBackground(preferences: model.preferences, shower: false)
-            if model.auth.session == nil {
-                AccountView(auth: model.auth).scrollContentBackground(.hidden)
-            } else {
-                VStack(spacing: 0) {
-                    Group {
-                        switch page {
-                        case 1: OriginalWalletView(model: model)
-                        case 2: OriginalProfileView(model: model)
-                        default: home
-                        }
-                    }.frame(maxWidth: .infinity, maxHeight: .infinity)
-                    HStack(spacing: 5) {
-                        tab("首页", "house.fill", 0)
-                        tab("钱包", "wallet.pass.fill", 1)
-                        tab("我的", "person.fill", 2)
-                    }.padding(6).background(.ultraThinMaterial, in: Capsule())
-                        .overlay(Capsule().stroke(.white.opacity(0.4))).padding(.horizontal, 55).padding(.bottom, 10)
+        LinYuThemeHost(preferences: model.preferences) {
+            ZStack(alignment: .bottom) {
+                OriginalBackground(preferences: model.preferences, shower: false)
+                if model.auth.session == nil {
+                    AccountView(auth: model.auth)
+                } else {
+                    pages
+                    if !inSettings { LinYuPillNavigation(selection: tab).padding(.bottom, 22) }
                 }
             }
-            if !model.message.isEmpty {
-                Text(model.message).font(.subheadline).padding(14).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
-                    .padding(.horizontal, 24).padding(.bottom, 85).transition(.opacity.combined(with: .move(edge: .bottom)))
-                    .task(id: model.message) {
-                        let text = model.message
-                        try? await Task.sleep(nanoseconds: 4_000_000_000)
-                        if model.message == text { model.message = "" }
-                    }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: .top) {
+                OriginalToast(message: model.message) { text in
+                    if model.message == text { model.message = "" }
+                }
             }
-        }
-        .tint(model.preferences.accentColor)
-        .preferredColorScheme(model.preferences.theme == "dark" ? .dark : model.preferences.theme == "light" ? .light : nil)
-        .sheet(isPresented: $scanner) { OriginalScannerView { code in Task { await model.scanCode(code) } } }
-        .sheet(item: $model.selectedDevice) { device in OriginalDeviceDetail(model: model, device: device).presentationDetents([.medium, .large]) }
-        .sheet(item: $model.startFailure) { failure in OriginalStartFailureView(model: model, failure: failure) }
-        .fullScreenCover(isPresented: Binding(get: { model.showShower != nil || model.showCloudShower != nil }, set: { if !$0 { model.showShower = nil; model.showCloudShower = nil } })) {
-            OriginalShowerView(model: model)
+            .linYuModal(isPresented: Binding(get: { dialog != nil }, set: { visible in if !visible { dismissDialog() } }),
+                        canDismiss: canDismissDialog) { dialogContent }
+            .fullScreenCover(isPresented: $scanner) {
+                OriginalScannerView { code in Task { await model.scanCode(code) } }
+            }
+            .fullScreenCover(isPresented: Binding(get: { model.showShower != nil || model.showCloudShower != nil },
+                                                  set: { if !$0 { closeShowerPage() } })) {
+                OriginalShowerView(model: model)
+            }
         }
         .onAppear { model.setForeground(scenePhase == .active) }
         .onChange(of: scenePhase) { model.setForeground($0 == .active) }
+        .onChange(of: model.auth.session?.ownerScope) { owner in
+            if owner != nil { page = 0; inSettings = false; sessionNotice = false }
+            else if model.auth.activity.contains("登录状态已失效") { sessionNotice = true }
+        }
         .onOpenURL { url in Task { await model.handle(url) } }
-        .confirmationDialog("该设备离线或需要手机蓝牙直连", isPresented: Binding(get: { model.pendingBluetoothFallback != nil }, set: { if !$0 { model.pendingBluetoothFallback = nil } }), titleVisibility: .visible) {
+    }
+    private var pages: some View {
+        Group {
+            switch page {
+            case 1: OriginalWalletView(model: model)
+            case 2: OriginalProfileView(model: model)
+            default: OriginalHomeView(model: model, onScan: { scanner = true }, onStart: start)
+            }
+        }
+        .id(page).frame(maxWidth: .infinity, maxHeight: .infinity)
+        .transition(.asymmetric(insertion: .move(edge: direction > 0 ? .trailing : .leading).combined(with: .opacity),
+                                removal: .move(edge: direction > 0 ? .leading : .trailing).combined(with: .opacity)))
+        .animation(.interpolatingSpring(stiffness: 420, damping: 32), value: page)
+        .clipped()
+    }
+    @ViewBuilder private var dialogContent: some View {
+        switch dialog {
+        case .session:
+            LinYuDialogCard {
+                VStack(spacing: 24) {
+                    Text("登录状态已失效").font(LinYuType.font(24, weight: .bold))
+                    Text("当前登录已失效。设备可能仍在用水，请重新登录核对，或立即使用官方客户端、联系人工处理。")
+                        .multilineTextAlignment(.center)
+                    Button { sessionNotice = false } label: { Text("确定").frame(maxWidth: .infinity) }.buttonStyle(LinYuButtonStyle())
+                }.frame(maxWidth: .infinity)
+            }
+        case .automatic:
+            if let event = model.automaticFinish {
+                OriginalAutomaticCloseDialog(event: event) { model.automaticFinish = nil }
+            }
+        case .opening: OriginalStartingDeviceDialog()
+        case .retry:
             if let device = model.pendingBluetoothFallback {
-                Button("使用蓝牙直连重试") { model.pendingBluetoothFallback = nil; model.setBluetooth(true, device: device); Task { await model.start(device) } }
+                OriginalBluetoothRetryDialog(device: device, onConfirm: {
+                    guard !model.isBusy else { return }
+                    model.pendingBluetoothFallback = nil
+                    model.setBluetooth(true, device: device)
+                    start(device)
+                }, onDismiss: { model.pendingBluetoothFallback = nil })
             }
-            Button("取消", role: .cancel) { model.pendingBluetoothFallback = nil }
-        }
-        .alert(item: $model.automaticFinish) { event in
-            Alert(title: Text("热水器已自动关闭"), message: Text("\(event.title)\n使用时长：\(max(0, event.duration) / 60)分\(max(0, event.duration) % 60)秒\n消费金额稍后可在账单中查看"), dismissButton: .default(Text("知道了")))
+        case .failure:
+            if let failure = model.startFailure {
+                OriginalStartFailureView(model: model, failure: failure) { model.startFailure = nil }
+            }
+        case .device:
+            if let device = model.selectedDevice {
+                OriginalDeviceDetail(model: model, device: device, onStart: start) { model.selectedDevice = nil }
+            }
+        case nil: EmptyView()
         }
     }
-    private func tab(_ title: String, _ symbol: String, _ index: Int) -> some View {
-        Button { withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { page = index } } label: {
-            VStack(spacing: 3) { Image(systemName: symbol); Text(title).font(.caption2) }
-                .foregroundStyle(page == index ? model.preferences.accentColor : Color.secondary)
-                .frame(maxWidth: .infinity).padding(.vertical, 10)
-                .background { if page == index { Capsule().fill(model.preferences.accentColor.opacity(0.12)).matchedGeometryEffect(id: "tab", in: capsule) } }
-        }.buttonStyle(.plain)
+    private func dismissDialog() {
+        guard canDismissDialog else { return }
+        switch dialog {
+        case .retry: model.pendingBluetoothFallback = nil
+        case .failure: model.startFailure = nil
+        case .device: model.selectedDevice = nil
+        default: break
+        }
     }
-    private var home: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 5) {
-                            HStack { Image("OriginalLogo").resizable().scaledToFit().frame(width: 36, height: 36); Text("淋浴").font(.largeTitle.bold()) }
-                            Text(model.account?.profile.schoolName ?? "趣智校园").font(.subheadline).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button { scanner = true } label: { Image(systemName: "qrcode.viewfinder").font(.title2).padding(12).background(.ultraThinMaterial, in: Circle()) }
-                    }
-                    OriginalGlassCard {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(model.balance?.title ?? "余额").foregroundStyle(.secondary)
-                                Text(model.balance?.formattedBalance ?? "¥ —").font(.system(size: 34, weight: .bold, design: .rounded))
-                                if model.balance?.isEstimated == true { Text("本地估算，并非真实余额").font(.caption).foregroundStyle(.secondary) }
-                            }
-                            Spacer(); Image(systemName: "drop.fill").font(.system(size: 40)).foregroundStyle(model.preferences.accentColor.opacity(0.6))
-                        }
-                    }
-                    if !model.activeBluetooth.isEmpty || !model.currentCloud.isEmpty {
-                        Text("使用中").font(.headline)
-                        ForEach(model.activeBluetooth) { record in
-                            OriginalGlassCard {
-                                VStack(alignment: .leading, spacing: 10) {
-                                    Text(OriginalFormatting.deviceName(record.binding.device.name)).font(.headline)
-                                    Text(record.statusText).font(.subheadline).foregroundStyle(.secondary)
-                                    HStack {
-                                        Text(record.startedAt ?? record.updatedAt, style: .timer).monospacedDigit()
-                                        Spacer()
-                                        Button(record.valve == .closed ? "继续结算" : "结束使用") { Task { await model.endBluetooth(record) } }.disabled(model.isBusy)
-                                    }
-                                }.contentShape(Rectangle()).onTapGesture { model.showShower = record.id }
-                            }
-                        }
-                        ForEach(model.currentCloud) { order in
-                            OriginalGlassCard {
-                                VStack(alignment: .leading, spacing: 10) {
-                                    Text(OriginalFormatting.deviceName(order.deviceName)).font(.headline)
-                                    HStack { Text(order.startedAt, style: .timer).monospacedDigit(); Spacer(); Button("结束使用") { Task { await model.endCloud(order.snCode) } }.disabled(model.isBusy) }
-                                }.contentShape(Rectangle()).onTapGesture { model.showCloudShower = order.snCode }
-                            }
-                        }
-                    }
-                    if let last = model.account?.lastDevice {
-                        Text("上次使用").font(.headline)
-                        OriginalGlassCard {
-                            HStack { Text(last.emoji).font(.title); VStack(alignment: .leading) { Text(last.displayName).font(.headline); Text(last.typeLabel).font(.caption).foregroundStyle(.secondary) }; Spacer(); Button("快速开始") { Task { await model.start(last) } }.disabled(model.isBusy) }
-                        }
-                    }
-                    HStack {
-                        Text("附近设备").font(.headline); Spacer()
-                        if model.ble.scanning { ProgressView() }
-                        Button(model.ble.scanning ? "停止" : "扫描") { if model.ble.scanning { model.ble.stopScan() } else { model.ble.startScan() } }.disabled(model.isBusy)
-                    }
-                    if !(model.account?.boundRoom ?? "").isEmpty { Label(model.account?.boundRoom ?? "", systemImage: "building.2").font(.caption).foregroundStyle(.secondary) }
-                    if model.filteredMeters.isEmpty {
-                        OriginalGlassCard { VStack(spacing: 12) { Image(systemName: "antenna.radiowaves.left.and.right").font(.largeTitle).foregroundStyle(model.preferences.accentColor); Text("靠近水表后扫描附近设备"); Text(model.ble.bluetoothStatus).font(.caption).foregroundStyle(.secondary); Button("开始扫描") { model.ble.startScan() }.disabled(model.isBusy) }.frame(maxWidth: .infinity).padding() }
-                    }
-                    ForEach(model.filteredMeters) { meter in
-                        Button { Task { await model.choose(meter) } } label: {
-                            OriginalGlassCard {
-                                HStack(spacing: 14) {
-                                    Text(model.nearby[meter.id]?.emoji ?? "🚿").font(.title)
-                                    VStack(alignment: .leading, spacing: 5) {
-                                        Text(model.nearby[meter.id]?.displayName ?? meter.name).font(.headline).foregroundStyle(.primary)
-                                        Text("信号：\(meter.rssi > -65 ? "强" : meter.rssi > -80 ? "中" : "弱")").font(.caption).foregroundStyle(.secondary)
-                                    }
-                                    Spacer(); Image(systemName: "chevron.right").foregroundStyle(.secondary)
-                                }
-                            }
-                        }.buttonStyle(.plain).disabled(model.isBusy)
-                    }
-                    if model.isBusy { ProgressView("正在处理…").frame(maxWidth: .infinity) }
-                }.padding(20).padding(.bottom, 12)
-            }.refreshable { await model.refresh() }.toolbar(.hidden, for: .navigationBar).background(Color.clear)
-        }.scrollContentBackground(.hidden)
+    private func closeShowerPage() { model.showShower = nil; model.showCloudShower = nil }
+    private func start(_ device: CampusDevice) {
+        guard !opening, !model.isBusy else { return }
+        opening = true
+        Task { await model.start(device); opening = false }
     }
 }
 
-@MainActor private struct OriginalDeviceDetail: View {
-    @ObservedObject var model: OriginalAppModel
-    let device: CampusDevice
-    @Environment(\.dismiss) private var dismiss
+struct OriginalToast: View {
+    let message: String
+    let onFinish: (String) -> Void
+    @State private var visible = false
     var body: some View {
-        NavigationStack {
-            Form {
-                Section { Text(device.emoji).font(.system(size: 50)).frame(maxWidth: .infinity); Text(device.displayName).font(.title3.bold()); LabeledContent("类型", value: device.typeLabel); LabeledContent("预扣金额", value: "¥ \(OriginalFormatting.money(device.withholdMoney ?? 0))"); LabeledContent("设备编号", value: device.snCode) }
-                Section {
-                    Toggle("蓝牙直连设备", isOn: Binding(get: { model.usesBluetooth(device) }, set: { model.setBluetooth($0, device: device) }))
-                    Text("需靠近设备开启手机蓝牙的水表使用蓝牙直连；联网设备沿用原版云端通道。").font(.footnote).foregroundStyle(.secondary)
+        Group {
+            if visible && !message.isEmpty {
+                HStack(spacing: 12) {
+                    Image("OriginalLogo").resizable().frame(width: 32, height: 32)
+                    LinYuTailText(text: message, size: 14, weight: .medium).foregroundStyle(.white)
                 }
-                Section {
-                    if let active = model.activeBluetooth.first(where: { $0.binding.device.deviceId == device.deviceId }) {
-                        Button("结束使用") { dismiss(); Task { await model.endBluetooth(active) } }
-                    } else if model.cloud.active.contains(where: { $0.snCode == device.snCode }) {
-                        Button("结束使用") { dismiss(); Task { await model.endCloud(device.snCode) } }
-                    } else {
-                        Button("开始使用") { dismiss(); Task { await model.start(device) } }
-                    }
-                }.disabled(model.isBusy)
-            }.navigationTitle("设备详情").toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } } }
-        }
+                .padding(.horizontal, 20).padding(.vertical, 16)
+                .background(Color(linYuHex: 0x1F2937), in: RoundedRectangle(cornerRadius: 16))
+                .shadow(color: .black.opacity(0.20), radius: 8, y: 4)
+                .padding(.horizontal, 24).padding(.top, 60)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }.allowsHitTesting(false)
+            .task(id: message) {
+                let text = message
+                withAnimation(.easeOut(duration: 0.25)) { visible = !text.isEmpty }
+                guard !text.isEmpty else { return }
+                do {
+                    try await Task.sleep(nanoseconds: 2_500_000_000)
+                    withAnimation(.easeIn(duration: 0.3)) { visible = false }
+                    try await Task.sleep(nanoseconds: 300_000_000)
+                    onFinish(text)
+                } catch {}
+            }
     }
 }
 
-@MainActor private struct OriginalStartFailureView: View {
-    @ObservedObject var model: OriginalAppModel
-    let failure: OriginalStartFailure
-    @Environment(\.dismiss) private var dismiss
-    @State private var confirming = false
-    private var bills: [CampusUnpaidBill] { failure.bills(in: model.unpaid) }
-    var body: some View {
-        NavigationStack {
-            List {
-                Section { Text(failure.message) }
-                if !bills.isEmpty {
-                    Section("检测到 \(bills.count) 笔未扣账单") {
-                        ForEach(bills) { bill in
-                            Text("¥ \(bill.consumeMoney ?? "?")   \(String((bill.consumeDate ?? "").prefix(16)))")
-                        }
-                        Text("账户有欠费时服务端会拒绝开阀").font(.footnote).foregroundStyle(.secondary)
-                    }
-                    Button("立即补扣") { confirming = true }.disabled(model.isBusy)
-                }
-            }
-            .navigationTitle(bills.isEmpty ? "开阀失败" : "开阀失败 · 有未扣账单")
-            .toolbar { Button("关闭") { dismiss() } }
-            .alert("确认补扣", isPresented: $confirming) {
-                Button("取消", role: .cancel) {}
-                Button("确认扣款") { model.startFailure = nil; Task { await model.deductAll() } }
-            } message: {
-                if let total = failure.total(for: bills) {
-                    Text("共 \(bills.count) 笔，合计 ¥ \(OriginalFormatting.money(total))。将向服务端请求扣款，请确认后继续。")
-                } else {
-                    Text("共 \(bills.count) 笔，金额无法确认。将按服务端账单实际金额请求扣款，请确认后继续。")
-                }
-            }
-        }.presentationDetents([.medium, .large])
-    }
-}
+
 
 @MainActor private struct OriginalShowerView: View {
     @ObservedObject var model: OriginalAppModel
