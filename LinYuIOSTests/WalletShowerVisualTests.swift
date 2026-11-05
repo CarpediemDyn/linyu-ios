@@ -16,7 +16,7 @@ import XCTest
         for width in [375.0, 430.0] {
             for dark in [false, true] {
                 for kind in ["LINE", "BAR"] {
-                    try capture("wallet-\(kind.lowercased())", width: width, dark: dark) {
+                    try await capture("wallet-\(kind.lowercased())", width: width, dark: dark) {
                         walletFixture(bills: bills, today: today, kind: kind)
                     }
                 }
@@ -28,7 +28,7 @@ import XCTest
         for width in [375.0, 430.0] {
             for dark in [false, true] {
                 for stopping in [false, true] {
-                    try capture(stopping ? "shower-stopping" : "shower-running", width: width, dark: dark) {
+                    try await capture(stopping ? "shower-stopping" : "shower-running", width: width, dark: dark, hosted: true) {
                         OriginalShowerContent(emoji: "🚿", status: "正在沐浴中", location: "龙川北苑 3号楼南 320房",
                                               preDeduct: 5, elapsed: 214, countdown: 46, hasCustomBackground: false,
                                               stopping: stopping, stopDisabled: stopping, continuingSettlement: false,
@@ -56,8 +56,8 @@ import XCTest
         }.padding(20).frame(maxHeight: .infinity, alignment: .top)
     }
 
-    private func capture<Content: View>(_ state: String, width: CGFloat, dark: Bool,
-                                        @ViewBuilder content: () -> Content) throws {
+    private func capture<Content: View>(_ state: String, width: CGFloat, dark: Bool, hosted: Bool = false,
+                                        @ViewBuilder content: () -> Content) async throws {
         let name = "\(state)-\(dark ? "dark" : "light")-\(Int(width))"
         let palette = LinYuPalette(isDark: dark)
         let size = CGSize(width: width, height: width == 375 ? 812 : 932)
@@ -65,9 +65,14 @@ import XCTest
             .background(palette.background)
             .environment(\.linYuColors, palette)
             .environment(\.colorScheme, dark ? .dark : .light)
-        let renderer = ImageRenderer(content: canvas)
-        renderer.scale = 2
-        let image = try XCTUnwrap(renderer.uiImage, "Missing visual attachment: " + name)
+        let image: UIImage
+        if hosted {
+            image = try await captureHostedVisual(canvas, size: size)
+        } else {
+            let renderer = ImageRenderer(content: canvas)
+            renderer.scale = 2
+            image = try XCTUnwrap(renderer.uiImage, "Missing visual attachment: " + name)
+        }
         XCTAssertEqual(image.size, size, name)
         let attachment = XCTAttachment(image: image)
         attachment.name = name
