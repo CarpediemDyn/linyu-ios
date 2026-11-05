@@ -90,8 +90,14 @@ private struct OriginalDeviceDetailLine: View {
             if confirming {
                 OriginalDeductConfirmDialog(amount: total, detail: "共 \(bills.count) 笔", busy: model.isBusy, onConfirm: {
                     guard !bills.isEmpty, let amount = total, amount.isFinite, !model.isBusy else { return }
+                    let confirmed = bills
+                    let owner = model.auth.session?.ownerScope
                     confirming = false; onDismiss()
-                    Task { await model.deductAll() }
+                    Task {
+                        guard owner != nil, model.auth.session?.ownerScope == owner,
+                              model.unpaid.filter(\.isDeductible) == confirmed, !model.isBusy else { return }
+                        await model.deductAll()
+                    }
                 }, onDismiss: { confirming = false })
             } else {
                 OriginalStartFailureContent(message: failure.message, bills: bills, busy: model.isBusy,
