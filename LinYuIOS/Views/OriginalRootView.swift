@@ -1,5 +1,4 @@
 import SwiftUI
-import Charts
 
 @MainActor struct OriginalRootView: View {
     @StateObject private var model = OriginalAppModel()
@@ -10,6 +9,7 @@ import Charts
     @State private var inSettings = false
     @State private var opening = false
     @State private var sessionNotice = false
+    private var showingShower: Bool { model.showShower != nil || model.showCloudShower != nil }
     private enum Dialog { case session, automatic, opening, retry, failure, device }
     private var dialog: Dialog? {
         if sessionNotice { return .session }
@@ -35,8 +35,13 @@ import Charts
                 if model.auth.session == nil {
                     AccountView(auth: model.auth)
                 } else {
-                    pages
-                    if !inSettings { LinYuPillNavigation(selection: tab).padding(.bottom, 22) }
+                    pages.opacity(showingShower ? 0 : 1).allowsHitTesting(!showingShower).accessibilityHidden(showingShower)
+                    if showingShower {
+                        OriginalShowerView(model: model, onBack: closeShowerPage)
+                            .transition(.opacity)
+                    } else if !inSettings {
+                        LinYuPillNavigation(selection: tab).padding(.bottom, 22)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -50,10 +55,7 @@ import Charts
             .fullScreenCover(isPresented: $scanner) {
                 OriginalScannerView { code in Task { await model.scanCode(code) } }
             }
-            .fullScreenCover(isPresented: Binding(get: { model.showShower != nil || model.showCloudShower != nil },
-                                                  set: { if !$0 { closeShowerPage() } })) {
-                OriginalShowerView(model: model)
-            }
+            .animation(.easeInOut(duration: 0.2), value: showingShower)
         }
         .onAppear { model.setForeground(scenePhase == .active) }
         .onChange(of: scenePhase) { model.setForeground($0 == .active) }
@@ -66,7 +68,7 @@ import Charts
     private var pages: some View {
         Group {
             switch page {
-            case 1: OriginalWalletView(model: model)
+            case 1: OriginalWalletView(model: model, onModalVisibilityChanged: { inSettings = $0 })
             case 2: OriginalProfileView(model: model)
             default: OriginalHomeView(model: model, onScan: { scanner = true }, onStart: start)
             }
@@ -160,133 +162,4 @@ struct OriginalToast: View {
                 } catch {}
             }
     }
-}
-
-
-
-@MainActor private struct OriginalShowerView: View {
-    @ObservedObject var model: OriginalAppModel
-    @Environment(\.dismiss) private var dismiss
-    private var record: WaterTransaction? { model.activeBluetooth.first { $0.id == model.showShower } }
-    private var order: CloudActiveOrder? { model.cloud.active.first { $0.snCode == model.showCloudShower } }
-    var body: some View {
-        ZStack {
-            OriginalBackground(preferences: model.preferences, shower: true)
-            VStack(spacing: 28) {
-                HStack { Button("收起") { dismiss() }; Spacer(); Text("淋浴").font(.headline); Spacer() }.padding()
-                Spacer()
-                Image(systemName: "drop.fill").font(.system(size: 72)).foregroundStyle(model.preferences.accentColor)
-                Text("正在用水").font(.title2.bold())
-                Text(record?.startedAt ?? order?.startedAt ?? record?.updatedAt ?? Date(), style: .timer).font(.system(size: 64, weight: .light, design: .rounded)).monospacedDigit()
-                Text(OriginalFormatting.deviceName(record?.binding.device.name ?? order?.deviceName ?? "用水已结束")).font(.headline)
-                if let order, order.autoDisconnectAt != nil {
-                    TimelineView(.periodic(from: .now, by: 1)) { _ in Text("闲置自动关闭倒计时：\(order.autoDisconRemain) 秒").font(.subheadline).foregroundStyle(.secondary) }
-                }
-                if let record { Text(record.statusText).font(.subheadline).foregroundStyle(.secondary) }
-                Spacer()
-                Button {
-                    if let record { Task { await model.endBluetooth(record) } }
-                    else if let order { Task { await model.endCloud(order.snCode) } }
-                    else { dismiss() }
-                } label: { Text(model.isBusy ? "正在结束…" : "结束使用").font(.headline).frame(maxWidth: .infinity).padding(20).background(model.preferences.accentColor, in: Capsule()).foregroundStyle(.white) }
-                    .disabled(model.isBusy).padding(30)
-            }
-        }.interactiveDismissDisabled(model.isBusy)
-    }
-}
-
-@MainActor struct OriginalWalletView: View {
-    @ObservedObject var model: OriginalAppModel
-    @State private var editingBalance = false
-    @State private var selectedBill: CampusBill?
-    @State private var confirmingDebt: CampusUnpaidBill?
-    @State private var confirmingAll = false
-    private var deductible: [CampusUnpaidBill] { model.unpaid.filter(\.isDeductible) }
-    private func deductionText(_ bills: [CampusUnpaidBill]) -> String {
-        let total = OriginalStartFailure(message: "", serverRejected: true).total(for: bills)
-        let amount = total.map { "合计 ¥ \(OriginalFormatting.money($0))" } ?? "金额无法确认，将按服务端账单实际金额扣款"
-        return "共 \(bills.count) 笔，\(amount)。确认后向服务端请求扣款。"
-    }
-    private var trend: [OriginalDailySpend] {
-        let calendar = Calendar.current
-        let start = model.preferences.trendRange == "LAST_7_DAYS"
-            ? calendar.date(byAdding: .day, value: -6, to: calendar.startOfDay(for: Date()))!
-            : calendar.dateInterval(of: .month, for: Date())!.start
-        var daily: [Date: Double] = [:]
-        for bill in model.bills {
-            if let date = bill.date, date >= start, date <= Date() { daily[calendar.startOfDay(for: date), default: 0] += bill.amount }
-        }
-        var result: [OriginalDailySpend] = []
-        var date = start
-        let end = calendar.startOfDay(for: Date())
-        while date <= end {
-            result.append(OriginalDailySpend(date: date, amount: daily[date, default: 0]))
-            guard let next = calendar.date(byAdding: .day, value: 1, to: date) else { break }
-            date = next
-        }
-        return result
-    }
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    Text("钱包").font(.largeTitle.bold())
-                    OriginalGlassCard {
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack { Text(model.balance?.title ?? "余额"); Spacer(); if model.balance?.isEstimated == true { Button("手动填写") { editingBalance = true }.font(.caption) } }
-                            Text(model.balance?.formattedBalance ?? "¥ —").font(.system(size: 38, weight: .bold, design: .rounded))
-                            Text(model.balance?.isEstimated == true ? "仅根据初始余额和账单估算，并非真实余额" : "来自账户的实时余额").font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                    if model.preferences.trendEnabled {
-                        OriginalGlassCard {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text("消费趋势").font(.headline)
-                                Picker("范围", selection: model.preferences.viewBinding(\.trendRange)) { Text("近7天").tag("LAST_7_DAYS"); Text("本月").tag("THIS_MONTH") }.pickerStyle(.segmented)
-                                if trend.isEmpty { Text("暂无消费数据").foregroundStyle(.secondary) }
-                                else {
-                                    Chart(trend) { bill in
-                                        if model.preferences.trendType == "BAR" { BarMark(x: .value("日期", bill.date, unit: .day), y: .value("金额", bill.amount)).foregroundStyle(model.preferences.accentColor.gradient) }
-                                        else { LineMark(x: .value("日期", bill.date, unit: .day), y: .value("金额", bill.amount)).foregroundStyle(model.preferences.accentColor).interpolationMethod(.catmullRom) }
-                                    }.frame(height: 150)
-                                    Text("合计 ¥\(OriginalFormatting.money(trend.reduce(0) { $0 + $1.amount }))").font(.caption).foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                    }
-                    if !model.unpaid.isEmpty {
-                        HStack { Text("未扣账单").font(.headline); Spacer(); Button("全部补扣") { confirmingAll = true }.disabled(model.isBusy || deductible.isEmpty) }
-                        ForEach(model.unpaid) { bill in
-                            OriginalGlassCard { HStack { VStack(alignment: .leading, spacing: 5) { Text(bill.description ?? "未扣账单"); Text("¥ \(bill.consumeMoney ?? "?")").bold() }; Spacer(); Button("请求代扣") { confirmingDebt = bill }.disabled(!bill.isDeductible || model.isBusy) } }
-                        }
-                    }
-                    Text("账单").font(.headline)
-                    if model.bills.isEmpty { Text("暂无账单数据").foregroundStyle(.secondary) }
-                    ForEach(Array(model.bills.prefix(20))) { bill in
-                        Button { selectedBill = bill; Task { await model.loadDetail(bill) } } label: {
-                            OriginalGlassCard { HStack { Text(bill.emoji).font(.title); VStack(alignment: .leading, spacing: 5) { Text(bill.displayDesc).foregroundStyle(.primary); Text(bill.consumeDate).font(.caption).foregroundStyle(.secondary) }; Spacer(); Text("−¥\(OriginalFormatting.money(bill.amount))").bold().foregroundStyle(.primary) } }
-                        }.buttonStyle(.plain)
-                    }
-                }.padding(20)
-            }.refreshable { await model.refresh() }.toolbar(.hidden, for: .navigationBar)
-            .alert("手动填写余额", isPresented: $editingBalance) { TextField("当前余额", text: $model.manualBalance).keyboardType(.decimalPad); Button("保存") { model.setManualBalance() }; Button("取消", role: .cancel) {} } message: { Text("仅用于本地估算，不会修改账户真实余额") }
-            .confirmationDialog("确认请求代扣这笔未支付账单？", isPresented: Binding(get: { confirmingDebt != nil }, set: { if !$0 { confirmingDebt = nil } }), titleVisibility: .visible) {
-                if let bill = confirmingDebt { Button("确认代扣") { confirmingDebt = nil; Task { await model.deduct(bill) } } }
-                Button("取消", role: .cancel) { confirmingDebt = nil }
-            } message: { Text(deductionText(confirmingDebt.map { [$0] } ?? [])) }
-            .confirmationDialog("确认补扣全部 \(deductible.count) 笔未支付账单？", isPresented: $confirmingAll, titleVisibility: .visible) {
-                Button("确认全部补扣") { Task { await model.deductAll() } }
-                Button("取消", role: .cancel) {}
-            } message: { Text(deductionText(deductible)) }
-            .sheet(item: $selectedBill) { bill in
-                NavigationStack { List { LabeledContent("设备", value: model.billDetail?.description ?? bill.displayDesc); LabeledContent("类型", value: bill.typeLabel); LabeledContent("消费金额", value: "¥ \(OriginalFormatting.money(model.billDetail?.consumeMoney ?? bill.amount))"); LabeledContent("消费时间", value: bill.consumeDate); LabeledContent("订单号", value: model.billDetail?.orderNo ?? bill.orderNo ?? bill.orderId) }.navigationTitle("账单详情").toolbar { Button("关闭") { selectedBill = nil } } }
-            }
-        }
-    }
-}
-
-private struct OriginalDailySpend: Identifiable {
-    let date: Date
-    let amount: Double
-    var id: Date { date }
 }
