@@ -21,17 +21,17 @@ import SwiftUI
                 LinearGradient(colors: [blue, Color(linYuHex: 0x0D47A1), Color(linYuHex: 0x051D40)], startPoint: .top, endPoint: .bottom)
                 Circle().fill(.white.opacity(0.04)).frame(width: 280, height: 280).offset(x: -120, y: -80)
                 Circle().fill(.white.opacity(0.06)).frame(width: 180, height: 180)
-                    .position(x: geometry.size.width - 30, y: geometry.size.height - 30)
+                    .position(x: geometry.size.width - 30, y: geometry.size.height + geometry.safeAreaInsets.top + geometry.safeAreaInsets.bottom - 30)
                 ScrollView {
                     VStack(spacing: 0) {
                         Image("OriginalLogo").resizable().frame(width: 80, height: 80).clipShape(RoundedRectangle(cornerRadius: 18))
-                        Text("淋 浴").font(LinYuType.font(30, weight: .bold)).foregroundStyle(.white).padding(.top, 16)
-                        Text("Hualala · 校园热水").font(LinYuType.font(13)).foregroundStyle(.white.opacity(0.55))
+                        Text("淋 浴").font(LinYuType.font(30, weight: .bold)).foregroundStyle(.white).frame(minHeight: 44).padding(.top, 16)
+                        Text("Hualala · 校园热水").font(LinYuType.font(13)).foregroundStyle(.white.opacity(0.55)).frame(minHeight: 24)
                         loginCard.padding(.top, 20)
                     }.padding(.horizontal, 28).padding(.top, 90).padding(.bottom, 28)
                         .offset(y: -50).scaleEffect(appeared ? 1 : 0.8)
                 }.scrollDismissesKeyboard(.interactively)
-            }.ignoresSafeArea()
+            }.ignoresSafeArea(.container)
         }.preferredColorScheme(.light)
             .onAppear { withAnimation(.easeInOut(duration: 0.4)) { appeared = true } }
             .onDisappear { countdownGeneration = UUID(); password = ""; smsCode = "" }
@@ -40,13 +40,13 @@ import SwiftUI
 
     private var loginCard: some View {
         VStack(spacing: 0) {
-            Text("欢迎回来").font(LinYuType.font(22, weight: .bold)).foregroundStyle(Color(linYuHex: 0x1A1A1A))
-            Text("请使用校园账号登录").font(LinYuType.font(13)).foregroundStyle(.gray).padding(.top, 4).padding(.bottom, 20)
+            Text("欢迎回来").font(LinYuType.font(22, weight: .bold)).foregroundStyle(Color(linYuHex: 0x1A1A1A)).frame(minHeight: 32)
+            Text("请使用校园账号登录").font(LinYuType.font(13)).foregroundStyle(.gray).frame(minHeight: 24).padding(.top, 4).padding(.bottom, 20)
             Button(usePassword ? "验证码登录" : "密码登录") {
                 usePassword.toggle(); error = nil; password = ""; smsCode = ""
-            }.font(LinYuType.font(13)).foregroundStyle(blue).frame(minHeight: 40).padding(.bottom, 16)
+            }.font(LinYuType.font(13)).foregroundStyle(blue).frame(minHeight: 48).padding(.bottom, 16)
             Text(usePassword ? "未设置密码？请使用手机号验证码登录" : "未注册的手机号将自动创建账号")
-                .font(LinYuType.font(12)).foregroundStyle(.gray).padding(.bottom, 12)
+                .font(LinYuType.font(12)).foregroundStyle(.gray).frame(minHeight: 24).padding(.bottom, 12)
             OriginalLoginField(title: "手机号", text: $phone, icon: "phone", kind: .phone)
             Group {
                 if usePassword {
@@ -66,14 +66,19 @@ import SwiftUI
                     else { Text("登 录").font(LinYuType.font(17, weight: .bold)) }
                 }.frame(maxWidth: .infinity).frame(height: 52)
             }.buttonStyle(.plain).foregroundStyle(.white)
-                .background(loggingIn ? Color(linYuHex: 0x90CAF9) : blue, in: RoundedRectangle(cornerRadius: 14))
-                .shadow(color: blue.opacity(0.18), radius: 4, y: 2).disabled(loggingIn || auth.loading).padding(.top, 24)
+                .background {
+                    RoundedRectangle(cornerRadius: 14, style: .circular).fill(loggingIn ? Color(linYuHex: 0x90CAF9) : blue)
+                        .shadow(color: .black.opacity(0.22), radius: 4, y: 3)
+                }.disabled(loggingIn || auth.loading).padding(.top, 24)
             if let error {
                 Text(error).font(LinYuType.font(13)).foregroundStyle(Color(linYuHex: 0xC62828)).multilineTextAlignment(.center)
                     .padding(12).background(Color(linYuHex: 0xFFEBEE), in: RoundedRectangle(cornerRadius: 8)).padding(.top, 16)
             }
-        }.padding(28).frame(maxWidth: .infinity).background(.white, in: RoundedRectangle(cornerRadius: 24))
-            .shadow(color: .black.opacity(0.20), radius: 12, y: 6)
+        }.padding(28).frame(maxWidth: .infinity)
+            .background {
+                RoundedRectangle(cornerRadius: 24, style: .circular).fill(.white)
+                    .shadow(color: .black.opacity(0.20), radius: 12, y: 6)
+            }
     }
     private func validPhone() -> Bool {
         guard !phone.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
@@ -144,8 +149,8 @@ private struct OriginalLoginField: View {
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(focused ? blue : Color(linYuHex: 0xBFC7D5), lineWidth: focused ? 2 : 1))
             .overlay(alignment: .topLeading) {
                 Text(title).font(LinYuType.font(raised ? 12 : 16)).foregroundStyle(focused ? blue : Color(linYuHex: 0x6B7280))
-                    .padding(.horizontal, raised ? 4 : 0).background(.white)
+                    .padding(.horizontal, raised ? 4 : 0).background(raised ? .white : .clear)
                     .offset(x: raised ? 12 : (icon == nil ? 16 : 52), y: raised ? -8 : 18).allowsHitTesting(false)
-            }.animation(.easeOut(duration: 0.15), value: raised)
+            }.padding(.top, 8).animation(.easeOut(duration: 0.15), value: raised)
     }
 }
