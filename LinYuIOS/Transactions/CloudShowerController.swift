@@ -64,10 +64,11 @@ enum CloudShowerError: LocalizedError {
     private var monitor: Task<Void, Never>?
     private var orderPolls: [String: Task<Void, Never>] = [:]
 
-    init(api: QzxyAPI = QzxyAPI(), defaults: UserDefaults = .standard,
+    init(api: QzxyAPI? = nil, defaults: UserDefaults = .standard,
          mqttEnabled: Bool = false,
          pause: @escaping (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) }) {
-        self.api = api; self.defaults = defaults; self.mqttEnabled = mqttEnabled; self.pause = pause
+        if let api { self.api = api } else { self.api = QzxyAPI() }
+        self.defaults = defaults; self.mqttEnabled = mqttEnabled; self.pause = pause
         mqtt.onConnectionChange = { [weak self] connected in
             self?.mqttConnected = connected
             self?.transportMessage = connected ? "MQTT 已连接，HTTP 持续核对状态" : "MQTT 不可用，使用 HTTP 轮询"

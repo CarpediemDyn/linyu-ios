@@ -127,7 +127,7 @@ import Charts
                     }
                     if !(model.account?.boundRoom ?? "").isEmpty { Label(model.account?.boundRoom ?? "", systemImage: "building.2").font(.caption).foregroundStyle(.secondary) }
                     if model.filteredMeters.isEmpty {
-                        OriginalGlassCard { VStack(spacing: 12) { Image(systemName: "antenna.radiowaves.left.and.right").font(.largeTitle).foregroundStyle(model.preferences.accentColor); Text("靠近水表后扫描附近设备"); Text(model.blemodel.preferences.accentColortoothStatus).font(.caption).foregroundStyle(.secondary); Button("开始扫描") { model.ble.startScan() }.disabled(model.isBusy) }.frame(maxWidth: .infinity).padding() }
+                        OriginalGlassCard { VStack(spacing: 12) { Image(systemName: "antenna.radiowaves.left.and.right").font(.largeTitle).foregroundStyle(model.preferences.accentColor); Text("靠近水表后扫描附近设备"); Text(model.ble.bluetoothStatus).font(.caption).foregroundStyle(.secondary); Button("开始扫描") { model.ble.startScan() }.disabled(model.isBusy) }.frame(maxWidth: .infinity).padding() }
                     }
                     ForEach(model.filteredMeters) { meter in
                         Button { Task { await model.choose(meter) } } label: {
