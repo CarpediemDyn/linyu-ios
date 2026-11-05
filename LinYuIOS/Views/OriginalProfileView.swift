@@ -20,7 +20,9 @@ private enum ProfilePanel: Equatable {
     private var preferences: OriginalPreferences { model.preferences }
     private var editing: Bool { settings ? editingSettings : editingProfile }
     private var hidesNavigation: Bool { settings || background || panel != nil }
-    private var hasActiveOrders: Bool { !model.activeBluetooth.isEmpty || !model.currentCloud.isEmpty }
+    private var hasActiveOrders: Bool {
+        !model.activeBluetooth.isEmpty || !model.unconfirmedBluetooth.isEmpty || !model.currentCloud.isEmpty
+    }
     private var busy: Bool { model.isBusy || model.candidateWorking }
 
     var body: some View {
@@ -208,7 +210,7 @@ private enum ProfilePanel: Equatable {
             LinYuDialogCard {
                 VStack(alignment: .leading, spacing: 16) {
                     ProfileDialogTitle(hasActiveOrders ? "无法退出" : "确认退出")
-                    Text(hasActiveOrders ? "设备使用中，无法退出" : "确定退出登录？")
+                    Text(hasActiveOrders ? "请结束用水或核实阀门状态后再退出" : "确定退出登录？")
                         .foregroundStyle(colors.textSecondary)
                     HStack(spacing: 0) {
                         Spacer()

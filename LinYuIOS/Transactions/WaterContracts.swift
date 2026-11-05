@@ -77,6 +77,8 @@ enum WaterPhase: String, Codable {
 }
 enum ValveFact: String, Codable { case unknown, open, closed }
 
+enum WaterUsageState: Equatable { case running, unconfirmed, settlementPending, archived }
+
 struct WaterTransaction: Codable, Identifiable {
     let id: UUID
     let binding: MeterBinding
@@ -96,17 +98,31 @@ struct WaterTransaction: Codable, Identifiable {
     var idleConfirmed = false
     var startedAt: Date? = nil
     var isPending: Bool { phase != .completed && phase != .rateRejected && phase != .superseded }
+    var billConfirmed: Bool? = nil
+    var usageState: WaterUsageState {
+        guard isPending else { return .archived }
+        // Older versions could leave an open flag on a settlement record.
+        if receipt != nil || [.collected, .uploading, .uploadUnknown, .serverRecorded, .writeBackPending].contains(phase) {
+            return .settlementPending
+        }
+        switch valve {
+        case .open: return .running
+        case .unknown: return .unconfirmed
+        case .closed: return .settlementPending
+        }
+    }
     var statusText: String {
         if phase == .rateRejected { return "服务器拒绝本次启动，未向水表写入费率" }
         if phase == .superseded { return "设备已空闲，本次未确认的启动记录已结束" }
         if phase == .completed {
+            if billConfirmed == true { return "设备已空闲，账单已核实" }
             if writeBackAcknowledged { return "已关阀、已记账，设备写回已确认" }
             return idleConfirmed ? "已关阀、已记账，设备已空闲；写回回执未确认" : "已关阀、已记账"
         }
-        if receipt != nil { return "服务器已记账，设备清账仍待确认" }
+        if receipt != nil || billConfirmed == true { return "服务器已记账，设备清账仍待确认" }
         if phase == .uploading || phase == .uploadUnknown { return "已关阀，服务器处理结果待核实" }
         if valve == .closed { return "阀已关闭，结算未完成" }
-        if valve == .open { return "用水中，尚未结算" }
+        if usageState == .running { return "用水中，尚未结算" }
         if phase == .closing { return "关闭未确认，请重试" }
         return "阀门状态未确认，请恢复核实"
     }
@@ -130,6 +146,7 @@ struct WaterJournal: Codable {
 @MainActor protocol WaterMeterService {
     func grantRate(device: LedgerDevice, state: BleDeviceState, session: QzxySession) async throws -> RateGrant
     func uploadConsumption(_ payload: Data, state: BleDeviceState, session: QzxySession) async throws -> SettlementReceipt
+    func hasRecordedConsumption(_ transaction: WaterTransaction, session: QzxySession) async throws -> Bool
     func reportFailure(consumeDate: String, session: QzxySession) async throws
 }
 

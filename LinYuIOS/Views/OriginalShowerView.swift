@@ -12,7 +12,7 @@ import SwiftUI
         case cloud(serial: String, orderNumber: String)
     }
 
-    private var record: WaterTransaction? { model.activeBluetooth.first { $0.id == model.showShower } }
+    private var record: WaterTransaction? { model.bluetoothTransactions.first { $0.id == model.showShower } }
     private var order: CloudActiveOrder? { model.currentCloud.first { $0.snCode == model.showCloudShower } }
     private var settling: Bool { model.settlingBluetooth.map { $0 == model.showShower } ?? false }
     private var closeUnconfirmed: Bool { model.unconfirmedBluetoothClose.map { $0 == model.showShower } ?? false }
@@ -63,7 +63,7 @@ import SwiftUI
         let startedAt = record?.startedAt ?? order?.startedAt
         let elapsed = startedAt.map { max(0, Int(date.timeIntervalSince($0))) } ?? 0
         let countdown = order?.autoDisconnectAt.map { max(0, Int(ceil($0.timeIntervalSince(date)))) } ?? 0
-        let needsRecovery = record.map { $0.valve != .open } ?? false
+        let needsRecovery = record.map { $0.usageState != .running } ?? false
         return OriginalShowerContent(
             emoji: device?.emoji ?? "🚿",
             status: settling ? "已确认关阀，正在结算" : needsRecovery ? (record?.statusText ?? "") : (device?.statusText ?? "正在沐浴中"),
@@ -75,7 +75,7 @@ import SwiftUI
             stopping: stopping && !closeUnconfirmed,
             settling: settling,
             stopDisabled: stopDisabled,
-            continuingSettlement: record?.valve == .closed,
+            continuingSettlement: record?.usageState == .settlementPending,
             onBack: onBack,
             onStop: requestStop
         )
@@ -104,7 +104,7 @@ import SwiftUI
 
     private func requestStop() {
         guard !stopDisabled else { return }
-        if record?.valve == .closed || stopTarget == nil {
+        if record?.usageState == .settlementPending || stopTarget == nil {
             stop()
         } else {
             stopConfirmation = stopTarget

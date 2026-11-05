@@ -21,6 +21,8 @@ import UIKit
                 Color.clear.frame(height: 8)
                 header
                 activeSection
+                recoverySection("阀门状态待核实", records: model.unconfirmedBluetooth, action: "核实状态")
+                recoverySection("已关阀，待结算", records: model.unsettledBluetooth, action: "继续结算")
                 HStack {
                     LinYuSectionTitle(title: "附近设备")
                     Spacer(minLength: 8)
@@ -85,6 +87,18 @@ import UIKit
             }.disabled(model.isBusy)
         }
     }
+    @ViewBuilder private func recoverySection(_ title: String, records: [WaterTransaction], action: String) -> some View {
+        if !records.isEmpty {
+            LinYuSectionTitle(title: title)
+            ForEach(records) { record in
+                OriginalSavedDeviceRow(name: OriginalFormatting.deviceName(record.binding.device.name),
+                                       emoji: "🚿", address: "", active: false,
+                                       status: record.statusText, actionTitle: action) { model.showShower = record.id }
+                    .disabled(model.isBusy)
+            }
+        }
+    }
+
     @ViewBuilder private var roomFilter: some View {
         if let room = model.account?.boundRoom, !room.isEmpty {
             HStack(spacing: 8) {
@@ -144,6 +158,8 @@ struct OriginalSavedDeviceRow: View {
     let emoji: String
     let address: String
     let active: Bool
+    var status: String? = nil
+    var actionTitle: String? = nil
     let onUse: () -> Void
     var body: some View {
         HStack(spacing: 14) {
@@ -156,11 +172,13 @@ struct OriginalSavedDeviceRow: View {
                             .background(colors.activeBackground, in: RoundedRectangle(cornerRadius: 6))
                         Text("点击恢复订单").font(LinYuType.font(12)).foregroundStyle(colors.textSecondary)
                     }
+                } else if let status {
+                    LinYuTailText(text: status, size: 12, weight: .regular).foregroundStyle(colors.textSecondary)
                 } else {
                     LinYuTailText(text: "MAC: " + address, size: 12, weight: .regular).foregroundStyle(colors.textSecondary)
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
-            Button(active ? "恢复" : "开始", action: onUse).buttonStyle(LinYuButtonStyle())
+            Button(actionTitle ?? (active ? "恢复" : "开始"), action: onUse).buttonStyle(LinYuButtonStyle())
         }.padding(16).frame(maxWidth: .infinity)
             .background(active ? colors.activeBackground : colors.card, in: RoundedRectangle(cornerRadius: 22))
             .overlay(RoundedRectangle(cornerRadius: 22).stroke(colors.border, lineWidth: 0.8))

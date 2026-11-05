@@ -6,14 +6,21 @@ import SwiftUI
     let onStart: (CampusDevice) -> Void
     let onDismiss: () -> Void
     private var bluetoothOrder: WaterTransaction? { model.activeBluetooth.first { $0.binding.device.deviceId == device.deviceId } }
+    private var bluetoothRecovery: WaterTransaction? {
+        (model.unconfirmedBluetooth + model.unsettledBluetooth).last {
+            $0.binding.device.deviceId == device.deviceId && !$0.idleConfirmed
+        }
+    }
     private var cloudOrder: CloudActiveOrder? { model.currentCloud.first { $0.snCode == device.snCode } }
     private var active: Bool { bluetoothOrder != nil || cloudOrder != nil }
     var body: some View {
         OriginalDeviceDetailContent(device: device, isActive: active, busy: model.isBusy,
                                     availability: model.selectedDeviceAvailability,
+                                    recovery: active ? nil : bluetoothRecovery?.usageState,
                                     bluetooth: Binding(get: { model.usesBluetooth(device) }, set: { model.setBluetooth($0, device: device) }), onConfirm: {
             if let bluetoothOrder { model.showShower = bluetoothOrder.id; onDismiss() }
             else if let cloudOrder { model.showCloudShower = cloudOrder.snCode; onDismiss() }
+            else if let bluetoothRecovery { model.showShower = bluetoothRecovery.id; onDismiss() }
             else { onDismiss(); onStart(device) }
         }, onDismiss: onDismiss)
     }
@@ -25,14 +32,17 @@ struct OriginalDeviceDetailContent: View {
     var isActive = false
     var busy = false
     var availability: OriginalDeviceAvailability = .idle
+    var recovery: WaterUsageState? = nil
     var bluetooth: Binding<Bool>? = nil
     let onConfirm: () -> Void
     let onDismiss: () -> Void
     private var typeTitle: String { device.isDrinkingWater ? (device.isHotWater ? "饮水（热水）" : "饮水（冷水）") : device.deviceName.hasPrefix("洗手台") ? "洗漱" : "沐浴" }
     private var typeName: String { device.isDrinkingWater ? "饮水机" : device.deviceName.hasPrefix("洗手台") ? "洗手台" : "热水器" }
-    private var canUse: Bool { (isActive || (availability != .occupied && availability != .running)) && !busy }
+    private var canUse: Bool { (isActive || recovery != nil || (availability != .occupied && availability != .running)) && !busy }
     private var buttonTitle: String {
         if isActive { return "恢复使用" }
+        if recovery == .settlementPending { return "继续结算" }
+        if recovery == .unconfirmed { return "核实状态" }
         if availability == .occupied { return "他人使用中" }
         if availability == .running { return "设备使用中" }
         return device.isDrinkingWater ? "开始接水" : "开始使用"
@@ -49,7 +59,7 @@ struct OriginalDeviceDetailContent: View {
                     OriginalDeviceDetailLine(label: "SN 码", value: device.snCode)
                     OriginalDeviceDetailLine(label: "MAC 地址", value: device.macAddress)
                     OriginalDeviceDetailLine(label: "预扣金额", value: device.withholdMoney.map { "¥" + OriginalFormatting.money($0) } ?? "金额未知")
-                    OriginalDeviceDetailLine(label: "状态", value: isActive ? "使用中" : availability.label)
+                    OriginalDeviceDetailLine(label: "状态", value: isActive ? "使用中" : recovery == .settlementPending ? "已关阀，待结算" : recovery == .unconfirmed ? "阀门状态待核实" : availability.label)
                     if device.needsBluetoothControl {
                         Text("此设备通过手机蓝牙直连控制：开启后请留在设备旁，走远会断开连接、无法关闭。")
                             .font(LinYuType.font(13)).lineSpacing(5).foregroundStyle(colors.textSecondary).padding(.top, 10)

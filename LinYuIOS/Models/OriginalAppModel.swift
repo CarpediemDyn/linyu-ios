@@ -82,9 +82,12 @@ import WidgetKit
         accountChanged(auth.session)
     }
 
-    var activeBluetooth: [WaterTransaction] {
+    var bluetoothTransactions: [WaterTransaction] {
         transactions.journal.transactions.filter { $0.binding.ownerScope == auth.session?.ownerScope && $0.isPending }
     }
+    var activeBluetooth: [WaterTransaction] { bluetoothTransactions.filter { $0.usageState == .running } }
+    var unconfirmedBluetooth: [WaterTransaction] { bluetoothTransactions.filter { $0.usageState == .unconfirmed } }
+    var unsettledBluetooth: [WaterTransaction] { bluetoothTransactions.filter { $0.usageState == .settlementPending } }
     var currentCloud: [CloudActiveOrder] { cloud.active }
     var filteredMeters: [DiscoveredWaterMeter] {
         ble.meters.filter { meter in
@@ -385,7 +388,7 @@ import WidgetKit
                 await transactions.open(binding: binding, session: session, trace: trace)
                 message = transactions.message
                 if let failure = transactions.failureMessage {
-                    if activeBluetooth.contains(where: { $0.binding.device.deviceId == device.deviceId && $0.valve == .unknown }) {
+                    if unconfirmedBluetooth.contains(where: { $0.binding.device.deviceId == device.deviceId }) {
                         result = "open_unconfirmed"
                     }
                     startFailure = OriginalStartFailure(message: failure, serverRejected: transactions.serverRejected)
@@ -429,9 +432,15 @@ import WidgetKit
             }
         }
         working = true
+        if record.usageState == .settlementPending { settlingBluetooth = record.id }
         defer {
             settlingBluetooth = nil; unconfirmedBluetoothClose = nil
             working = false; publishSnapshot()
+        }
+        if transactions.storageBlocked, record.usageState == .settlementPending {
+            message = WaterError.storage.localizedDescription
+            trace.finish("settlement_pending")
+            return
         }
         if transactions.storageBlocked { await transactions.closeOnly(id: record.id, session: session) }
         else { await transactions.close(id: record.id, session: session, trace: trace) }
@@ -441,7 +450,7 @@ import WidgetKit
                 : transactions.message
             trace.finish(current.isPending || transactions.storageBlocked ? "settlement_pending" : "settled")
             if showShower == record.id { showShower = nil }
-            if current.receipt != nil { refreshAfterWaterOperation() }
+            if current.receipt != nil || current.billConfirmed == true { refreshAfterWaterOperation() }
         } else {
             message = "关闭未确认，请重试：\(transactions.message)"
             trace.finish("close_unconfirmed")
@@ -575,7 +584,7 @@ import WidgetKit
         if previous.ownerScope == session.ownerScope { snapshot.controlNonce = previous.controlNonce }
         snapshot.balance = balance?.formattedBalance ?? "¥ —"; snapshot.balanceTitle = balance?.title ?? "余额"
         snapshot.lastDevice = account?.lastDevice?.displayName ?? "暂无上次设备"; snapshot.lastDeviceID = account?.lastDevice?.deviceId ?? ""
-        snapshot.orders = activeBluetooth.filter { $0.valve != .closed }.map { .init(id: $0.id.uuidString, title: $0.binding.device.name, startedAt: $0.startedAt ?? $0.updatedAt, isBluetooth: true) }
+        snapshot.orders = activeBluetooth.map { .init(id: $0.id.uuidString, title: $0.binding.device.name, startedAt: $0.startedAt ?? $0.updatedAt, isBluetooth: true) }
         snapshot.orders += cloud.active.map { .init(id: $0.snCode, title: $0.deviceName, startedAt: $0.startedAt, isBluetooth: false) }
         snapshot.bills = bills.prefix(3).map { .init(id: $0.id, title: $0.displayDesc, amount: OriginalFormatting.money($0.amount)) }
         var comparable = snapshot; comparable.updatedAt = .distantPast
@@ -607,10 +616,10 @@ import WidgetKit
         for order in snapshot.orders where preferences.notifyInUse {
             OriginalNotifications.shared.post(id: "inuse.\(order.id)", title: "淋浴 · 正在用水", text: order.title, url: LinYuWidgetStorage.url(action: "stop", id: order.id), active: true)
         }
-        for record in transactions.journal.transactions where record.binding.ownerScope == session.ownerScope && record.valve == .closed {
+        for record in transactions.journal.transactions where record.binding.ownerScope == session.ownerScope && record.usageState != .running {
             let id = record.id.uuidString
             OriginalNotifications.shared.remove(id: "inuse.\(id)")
-            if preferences.notifyFinished, record.receipt != nil, record.updatedAt > Date().addingTimeInterval(-1800), completedNotified.insert(id).inserted { OriginalNotifications.shared.post(id: "finished.\(id)", title: "用水已结束", text: record.binding.device.name, url: nil) }
+            if preferences.notifyFinished, record.usageState != .unconfirmed, record.receipt != nil || record.billConfirmed == true, record.updatedAt > Date().addingTimeInterval(-1800), completedNotified.insert(id).inserted { OriginalNotifications.shared.post(id: "finished.\(id)", title: "用水已结束", text: record.binding.device.name, url: nil) }
         }
     }
     /// Expose only the amount already reconciled for this exact finished order.
@@ -630,11 +639,11 @@ import WidgetKit
               snapshot.ownerScope == auth.session?.ownerScope else { return }
         let id = items.first(where: { $0.name == "id" })?.value ?? ""
         if url.host == "stop" {
-            if let record = activeBluetooth.first(where: { $0.id.uuidString == id }) { await endBluetooth(record) }
+            if let record = bluetoothTransactions.first(where: { $0.id.uuidString == id && $0.usageState != .settlementPending }) { await endBluetooth(record) }
             else if cloud.active.contains(where: { $0.snCode == id }) { await endCloud(id) }
         } else if url.host == "start", let device = account?.lastDevice, device.deviceId == id { await start(device) }
         else if url.host == "show" {
-            if let record = activeBluetooth.first(where: { $0.id.uuidString == id }) { showShower = record.id }
+            if let record = bluetoothTransactions.first(where: { $0.id.uuidString == id && $0.usageState != .settlementPending }) { showShower = record.id }
             else if cloud.active.contains(where: { $0.snCode == id }) { showCloudShower = id }
         }
     }

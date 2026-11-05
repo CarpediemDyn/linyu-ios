@@ -175,7 +175,9 @@ import XCTest
         ble.failCommand = nil
         try await engine.open(binding: binding, session: session)
         XCTAssertEqual(api.rateCalls, 2)
-        XCTAssertEqual(engine.journal.transactions.first?.phase, .superseded)
+        XCTAssertEqual(engine.journal.transactions.first?.phase, .needsAttention)
+        XCTAssertEqual(engine.journal.transactions.first?.orderNo, "test-order")
+        XCTAssertEqual(engine.journal.transactions.first?.usageState, .settlementPending)
         XCTAssertEqual(engine.journal.transactions.last?.phase, .running)
     }
 
@@ -275,22 +277,73 @@ import XCTest
         }
     }
 
-    func testUploadFailureCanRetryOnReconnectRatherThanLockForever() async throws {
+    func testUploadTimeoutRemainsReadOnlyAcrossRelaunchAndRepeatedRecovery() async throws {
         let (engine, ble, api, store) = try make()
         let binding = try await engine.pair(device: device, session: session)
         try await engine.open(binding: binding, session: session)
-        let id = engine.journal.transactions.last!.id
+        let id = try XCTUnwrap(engine.journal.transactions.last?.id)
         api.failUpload = true
-        do { try await engine.closeAndSettle(id: id, session: session); XCTFail("upload failed") } catch {}
-        XCTAssertEqual(store.snapshot.transactions.last?.phase, .uploadUnknown)
-        XCTAssertEqual(api.failureCalls, 1)
-        api.failUpload = false
+        do { try await engine.closeAndSettle(id: id, session: session); XCTFail("upload timed out") } catch WaterError.disconnected {}
+        let closed = try XCTUnwrap(store.snapshot.transactions.last)
+        XCTAssertEqual(closed.phase, .uploadUnknown)
+        XCTAssertEqual(closed.valve, .closed)
+        XCTAssertEqual(closed.usageState, .settlementPending)
+        XCTAssertTrue(closed.isPending)
+        XCTAssertEqual(api.failureCalls, 0)
+
         let restored = try WaterTransactionEngine(transport: ble, service: api, store: store, decodeWriteBack: { _ in Data([1]) })
-        let previousConnection = ble.connectionID
+        api.failUpload = false
+        let commandCount = ble.commands.count
+        for _ in 0..<2 {
+            do { try await restored.recover(id: id, session: session); XCTFail("missing bill") } catch {}
+        }
+        XCTAssertEqual(Array(ble.commands.dropFirst(commandCount)), [0x23, 0x23])
+        XCTAssertEqual(api.uploadCalls, 1)
+        XCTAssertEqual(api.billChecks, 2)
+        XCTAssertEqual(restored.journal.transactions.last?.consumption, closed.consumption)
+
+        api.recordedConsumption = true
+        ble.state = 0
         try await restored.recover(id: id, session: session)
-        XCTAssertNotEqual(ble.connectionID, previousConnection)
-        XCTAssertEqual(api.uploadCalls, 2)
-        XCTAssertEqual(restored.journal.transactions.last?.phase, .completed)
+        XCTAssertEqual(restored.journal.transactions.last?.usageState, .archived)
+        XCTAssertEqual(restored.journal.transactions.last?.billConfirmed, true)
+        XCTAssertNil(restored.journal.transactions.last?.receipt)
+        XCTAssertEqual(api.uploadCalls, 1)
+        _ = try WaterTransactionEngine(transport: ble, service: api, store: store, decodeWriteBack: { _ in nil })
+    }
+
+    func testIdleOpenPreservesAmbiguousSettlementWithoutReusingIt() async throws {
+        let (engine, ble, api, _) = try make()
+        let binding = try await engine.pair(device: device, session: session)
+        try await engine.open(binding: binding, session: session)
+        let id = try XCTUnwrap(engine.journal.transactions.last?.id)
+        api.failUpload = true
+        do { try await engine.closeAndSettle(id: id, session: session); XCTFail("upload timed out") } catch WaterError.disconnected {}
+        let pending = try XCTUnwrap(engine.journal.transactions.last)
+        ble.state = 0
+        try await engine.open(binding: binding, session: session)
+        let old = try XCTUnwrap(engine.journal.transactions.first)
+        XCTAssertEqual(old.phase, .uploadUnknown)
+        XCTAssertEqual(old.consumeDate, pending.consumeDate)
+        XCTAssertEqual(old.orderNo, pending.orderNo)
+        XCTAssertEqual(old.consumption, pending.consumption)
+        XCTAssertTrue(old.idleConfirmed)
+        XCTAssertEqual(old.usageState, .settlementPending)
+        XCTAssertEqual(engine.journal.transactions.last?.usageState, .running)
+        XCTAssertNotEqual(engine.journal.transactions.last?.id, old.id)
+    }
+
+    func testOpeningWithPreviousRunningRecordAndStateSixMarksClosedBeforeUpload() async throws {
+        let (engine, ble, api, _) = try make()
+        let binding = try await engine.pair(device: device, session: session)
+        try await engine.open(binding: binding, session: session)
+        ble.state = 6
+        api.failUpload = true
+        do { try await engine.open(binding: binding, session: session); XCTFail("upload timed out") } catch WaterError.disconnected {}
+        XCTAssertEqual(engine.journal.transactions.last?.valve, .closed)
+        XCTAssertEqual(engine.journal.transactions.last?.usageState, .settlementPending)
+        XCTAssertEqual(api.rateCalls, 1)
+        XCTAssertFalse(ble.commands.contains(0x22))
     }
 
     func testReceiptSurvivesFailedWriteBackAndRetryDoesNotUploadAgain() async throws {
@@ -356,6 +409,7 @@ import XCTest
         ble.failCommand = 0x22
         do { try await engine.closeAndSettle(id: engine.journal.transactions.last!.id, session: session); XCTFail("lost ACK") } catch {}
         XCTAssertEqual(engine.journal.transactions.last?.valve, .unknown)
+        XCTAssertEqual(engine.journal.transactions.last?.usageState, .unconfirmed)
         XCTAssertEqual(api.uploadCalls, 0)
         XCTAssertEqual(api.failureCalls, 1)
     }
@@ -449,6 +503,8 @@ import XCTest
     var uploadCalls = 0
     var failureCalls = 0
     var failUpload = false
+    var billChecks = 0
+    var recordedConsumption = false
     var failReport = false
     var rejectRate = false
     var consumeDate = "261104120000"
@@ -466,6 +522,10 @@ import XCTest
         if uploadDelay > 0 { try await Task.sleep(nanoseconds: uploadDelay) }
         if failUpload { throw WaterError.disconnected }
         return SettlementReceipt(clData: "test-cipher", amountRaw: "123")
+    }
+    func hasRecordedConsumption(_ transaction: WaterTransaction, session: QzxySession) async throws -> Bool {
+        billChecks += 1
+        return recordedConsumption
     }
     func reportFailure(consumeDate: String, session: QzxySession) async throws {
         failureCalls += 1

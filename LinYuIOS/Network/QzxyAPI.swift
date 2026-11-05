@@ -172,6 +172,28 @@ struct QzxyAPI: WaterMeterService {
                                  amountRaw: text(data["upMoney"]) ?? text(data["consumeMoney"]))
     }
 
+    @MainActor func hasRecordedConsumption(_ transaction: WaterTransaction, session: QzxySession) async throws -> Bool {
+        guard !transaction.orderNo.isEmpty else { return false }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
+        formatter.dateFormat = "yyyy-MM"
+        let fallback = formatter.string(from: transaction.startedAt ?? transaction.updatedAt)
+        let date = transaction.consumeDate
+        let month: String
+        if date.range(of: #"^[0-9]{12}$"#, options: .regularExpression) != nil {
+            month = "20" + date.prefix(2) + "-" + date.dropFirst(2).prefix(2)
+        } else if date.range(of: #"^[0-9]{4}-[0-9]{2}"#, options: .regularExpression) != nil {
+            month = String(date.prefix(7))
+        } else {
+            month = fallback
+        }
+        let rows = try await bills(month: month, session: session)
+        return rows.contains {
+            ($0.orderNo == transaction.orderNo || $0.orderId == transaction.orderNo) && $0.amount.isFinite && $0.amount > 0
+        }
+    }
+
     @MainActor func reportFailure(consumeDate: String, session: QzxySession) async throws {
         guard !consumeDate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               let signature = KailuSigner.signFail(loginCode: session.loginCode,
