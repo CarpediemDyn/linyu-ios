@@ -29,6 +29,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: org.linyu.prototype.livecontainer
         PRODUCT_NAME: LinYuIOS
         PRODUCT_MODULE_NAME: LinYuIOS
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_ENTITLEMENTS: ""
   LinYuIOSTests:
     type: bundle.unit-test
