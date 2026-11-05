@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import XCTest
 @testable import LinYuIOS
 
@@ -20,11 +21,38 @@ import XCTest
                         Spacer()
                     }.padding(20)
                 }
-                try capture("background-default-" + suffix, width: width, dark: dark) {
+                try await captureHosted("background-default-" + suffix, width: width, dark: dark) {
                     ProfileBackgroundPage(preferences: preferences, onBack: {}).defaultAppStorage(defaults)
                 }
             }
         }
+    }
+
+    private func captureHosted<Content: View>(_ name: String, width: CGFloat, dark: Bool,
+                                              @ViewBuilder content: () -> Content) async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previous = scene.windows.first(where: \.isKeyWindow)
+        let size = CGSize(width: width, height: 667)
+        let root = content().frame(width: size.width, height: size.height)
+            .environment(\.linYuColors, LinYuPalette(isDark: dark))
+            .environment(\.colorScheme, dark ? .dark : .light)
+        let controller = UIHostingController(rootView: root)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(origin: .zero, size: size)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; previous?.makeKey() }
+        try await Task.sleep(nanoseconds: 200_000_000)
+        let view = controller.view!
+        view.layoutIfNeeded()
+        let format = UIGraphicsImageRendererFormat(); format.scale = 2
+        let image = UIGraphicsImageRenderer(bounds: view.bounds, format: format).image { _ in
+            XCTAssertTrue(view.drawHierarchy(in: view.bounds, afterScreenUpdates: true), name)
+        }
+        let attachment = XCTAttachment(image: image)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     private func capture<Content: View>(_ name: String, width: CGFloat, dark: Bool,
