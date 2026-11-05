@@ -1,7 +1,12 @@
 import SwiftUI
 
 @MainActor struct OriginalRootView: View {
-    @StateObject private var model = OriginalAppModel()
+    @StateObject private var model: OriginalAppModel
+
+    init(model: OriginalAppModel? = nil) {
+        _model = StateObject(wrappedValue: model ?? OriginalAppModel())
+    }
+
     @Environment(\.scenePhase) private var scenePhase
     @State private var page = 0
     @State private var direction = 1

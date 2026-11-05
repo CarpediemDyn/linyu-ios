@@ -5,12 +5,12 @@ import WidgetKit
 #endif
 
 @MainActor final class OriginalAppModel: ObservableObject {
-    let auth = AuthManager()
+    let auth: AuthManager
     let ble = BleCentral()
     let preferences = OriginalPreferences()
-    let cloud = CloudShowerController(mqttEnabled: true)
+    let cloud: CloudShowerController
     let logs = OriginalLogs.shared
-    let api = QzxyAPI()
+    let api: QzxyAPI
     let transactions: TransactionManager
     @Published var account: CampusAccountCache?
     @Published var balance: CampusBalanceSnapshot?
@@ -57,7 +57,10 @@ import WidgetKit
     private var lastWidgetPayload: Data?
     private var snapshotCleared = false
 
-    init() {
+    init(authentication: AuthManager? = nil, network: QzxyAPI? = nil, cloudController: CloudShowerController? = nil) {
+        auth = authentication ?? AuthManager()
+        api = network ?? QzxyAPI()
+        cloud = cloudController ?? CloudShowerController(mqttEnabled: true)
         transactions = TransactionManager(transport: ble, auth: auth)
         for publisher in [auth.objectWillChange.eraseToAnyPublisher(), ble.objectWillChange.eraseToAnyPublisher(),
                           transactions.objectWillChange.eraseToAnyPublisher(), cloud.objectWillChange.eraseToAnyPublisher(),
