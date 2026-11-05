@@ -42,7 +42,7 @@ private enum ProfilePanel: Equatable {
         .onChange(of: hidesNavigation) { onSettingsVisibilityChanged($0) }
         .onDisappear { onSettingsVisibilityChanged(false) }
         .task {
-            await model.refresh()
+            if !model.refreshing { await model.refresh() }
             while model.refreshing && !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 100_000_000)
             }

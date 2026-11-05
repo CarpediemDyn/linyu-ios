@@ -19,14 +19,16 @@ struct ProfileRelease: Decodable, Identifiable {
     var highlights: String {
         var result: [String] = []
         var including = false
-        for line in (body ?? "").components(separatedBy: .newlines) {
+        let lines = (body ?? "").replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: .newlines)
+        for line in lines {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed.hasPrefix("#") {
-                let heading = String(String.UnicodeScalarView(trimmed.drop(while: { $0 == "#" }).unicodeScalars.filter { scalar in
+                let scalars = trimmed.drop(while: { $0 == "#" }).unicodeScalars.filter { scalar in
                     (0x4E00...0x9FFF).contains(scalar.value)
                         || (0x3000...0x303F).contains(scalar.value)
                         || (0x20...0x7E).contains(scalar.value)
-                })).trimmingCharacters(in: .whitespaces)
+                }
+                let heading = scalars.map(String.init).joined().trimmingCharacters(in: .whitespaces)
                 including = ["新增", "功能", "修复", "BUG"].contains { heading.localizedCaseInsensitiveContains($0) }
                 if including {
                     if !result.isEmpty { result.append("") }
@@ -83,8 +85,8 @@ struct ProfileRepository: Decodable {
                                            resolvingAgainstBaseURL: false)
             components?.queryItems = [URLQueryItem(name: "per_page", value: "10")]
             guard let url = components?.url else { return }
-            releases = await read([ProfileRelease].self, from: url)?
-                .filter { !$0.prerelease && !$0.draft } ?? []
+            let fetched = await read([ProfileRelease].self, from: url)
+            releases = fetched?.filter { !$0.prerelease && !$0.draft } ?? []
         }
     }
 

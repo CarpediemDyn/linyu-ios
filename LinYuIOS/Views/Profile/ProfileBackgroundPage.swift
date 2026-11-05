@@ -55,9 +55,13 @@ import SwiftUI
             importTask?.cancel()
             let scope = preferences.backgroundScope
             importTask = Task {
-                guard let data = try? await item.loadTransferable(type: Data.self), !Task.isCancelled else { return }
-                try? preferences.setBackground(data, scope: scope)
-                selection = nil
+                defer { if !Task.isCancelled { selection = nil } }
+                do {
+                    guard let data = try await item.loadTransferable(type: Data.self), !Task.isCancelled else { return }
+                    try preferences.setBackground(data, scope: scope)
+                } catch {
+                    if !Task.isCancelled { OriginalLogs.shared.add("保存自定义背景失败：\(error.localizedDescription)") }
+                }
             }
         }
         .onDisappear { importTask?.cancel() }
@@ -117,7 +121,7 @@ import SwiftUI
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 0) {
                 Text("主题色").font(LinYuType.font(13)).padding(.trailing, 10)
-                Circle().fill(themeRGB.map { Color(linYuHex: UInt32($0)) } ?? colors.accent)
+                Circle().fill(themeRGB.map { Color(linYuHex: UInt32(truncatingIfNeeded: $0)) } ?? colors.accent)
                     .frame(width: 20, height: 20).padding(.trailing, 8)
                 Text(themeRGB == nil ? "使用默认强调色" : "已根据图片自动提取")
                     .font(LinYuType.font(12))

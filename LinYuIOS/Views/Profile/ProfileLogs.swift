@@ -30,7 +30,7 @@ import UIKit
                     Text("暂无日志").font(LinYuType.font(16)).foregroundStyle(colors.textSecondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    ProfileLogScroll(entries: entries, textColor: UIColor(colors.textPrimary),
+                    ProfileLogScroll(entries: entries.map(redacted), textColor: UIColor(colors.textPrimary),
                                      thumbColor: UIColor(colors.textSecondary.opacity(0.45)))
                 }
                 ProfileDivider()
@@ -73,11 +73,18 @@ import UIKit
         let time = Int64(Date().timeIntervalSince1970 * 1000)
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("linyu_log_\(time).txt")
         do {
-            try lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+            try lines.map(redacted).joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
             share = Export(url: url)
         } catch {
             logs.add("导出日志失败：\(error.localizedDescription)")
         }
+    }
+
+    private func redacted(_ line: String) -> String {
+        line.replacingOccurrences(
+            of: #"(?i)(password|loginCode|secret|telPhone|telephone|smsCode|useCode|userId|accountId|(?<![A-Za-z])code)["']?\s*[:=]\s*["']?([^"'&\s,}]+)"#,
+            with: "$1=***", options: .regularExpression
+        )
     }
 }
 
@@ -100,7 +107,7 @@ private struct ProfileLogScroll: UIViewRepresentable {
     let textColor: UIColor
     let thumbColor: UIColor
 
-    func makeUIView(context: Context) -> LogScrollContainer { LogScrollContainer() }
+    func makeUIView(context: Context) -> LogScrollContainer { LogScrollContainer(frame: .zero) }
 
     func updateUIView(_ view: LogScrollContainer, context: Context) {
         view.apply(entries: entries, textColor: textColor, thumbColor: thumbColor)
