@@ -1,0 +1,16 @@
+{
+  "target": "official v3.1.0",
+  "android_commit": "a650066a9624681a0e3404063219435d3717fa98",
+  "android_head": "ff5f8befb2416a21955927c54677e26740a4002a",
+  "apk": "linyu-v3.1.0.apk",
+  "apk_versionCode": 16,
+  "apk_sha256": "5212f96c856b9d91388511d33533d8122dd5d1481863bd671909602a599163aa",
+  "baseline_ios_commit": "a2527e5968af751fd0cf4477a18f186bcdefd3ea",
+  "baseline_run": 41950505654,
+  "ui_branch": "ui/android-parity",
+  "unreleased_differences": [
+    "UI MainViewModel business fixes",
+    "assets/preview.png",
+    "WidgetRenderer business fixes"
+  ]
+}
