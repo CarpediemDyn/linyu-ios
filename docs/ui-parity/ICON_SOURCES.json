@@ -1,0 +1,246 @@
+[
+  {
+    "name": "ic_device_shower",
+    "source": "app/src/main/res/drawable/ic_device_shower.xml",
+    "source_sha256": "59ffdc82acf415d463e071b5d3105c5a2ab77538fba9858fdb864be2d6e0b8a0",
+    "svg_sha256": "1900411093c961b3298a03546bbd4629da7b75a4fedd9b1e1c3bd6632c8f4b98"
+  },
+  {
+    "name": "ic_device_sink",
+    "source": "app/src/main/res/drawable/ic_device_sink.xml",
+    "source_sha256": "18073b131308a4c8da081330a1f7288a7a28352929977f537d087ae7da5a0bee",
+    "svg_sha256": "966d00a4f23ad3d3824b608df9241c9ebc9e1e88ffffecd7fbcfad53599cfbc4"
+  },
+  {
+    "name": "ic_flashlight",
+    "source": "app/src/main/res/drawable/ic_flashlight.xml",
+    "source_sha256": "bc28e39e37fc1cf15ec72367f7a3c3222941fc2ada108dba6a3c94c60ee34588",
+    "svg_sha256": "0f7e662792356996ea290399a6d6b7ab89ef53f8ec3d7febb6fa3b664683f3d1"
+  },
+  {
+    "name": "ic_flashlight_on",
+    "source": "app/src/main/res/drawable/ic_flashlight_on.xml",
+    "source_sha256": "9d821fa99315da6d503dd4e56fac9eddecddf7d466b0838c07d12ba0d663d019",
+    "svg_sha256": "037a0999cccc424777a6f93ca5e510aa37c5d531c21c11d950a6606f2a226fa0"
+  },
+  {
+    "name": "ic_notify_shower",
+    "source": "app/src/main/res/drawable/ic_notify_shower.xml",
+    "source_sha256": "24de33dde9e3947226ff45da8934e617e987cda28f546789548f89aae259e86b",
+    "svg_sha256": "ad3fceccb4005cefaf54221ae87c5a0edd7c9dc8c5aa6ce1fcc5ce74bdbfaca0"
+  },
+  {
+    "name": "ic_photo_library",
+    "source": "app/src/main/res/drawable/ic_photo_library.xml",
+    "source_sha256": "1817fdec6af3fbb32641e7c07ab475eba612acdd2b6877fdc625724adc425e57",
+    "svg_sha256": "18dd9873e74bfc4a1ffb0983f20baf4f67995145034f664d3a4c7ff90c0a0af9"
+  },
+  {
+    "name": "ic_qr_code_scanner",
+    "source": "app/src/main/res/drawable/ic_qr_code_scanner.xml",
+    "source_sha256": "47608bb25fc4c1fa99bc65d2f03f3421d983c16f1f672df3abb1aa3993f060b9",
+    "svg_sha256": "ee8fb32bb53a1f9e9229cbdb3b138c9acd4feb1103d0c7685cd46ab670d8bec0"
+  },
+  {
+    "name": "ic_receipt_long",
+    "source": "app/src/main/res/drawable/ic_receipt_long.xml",
+    "source_sha256": "f59cda76997c8191b93654197e9b5dad326bb4f3dc293ecfa58ba3ee122150c2",
+    "svg_sha256": "0e6434adb327b9eee8a25dba99129e4736d14ac52a79e1516b20f8a5eaa47802"
+  },
+  {
+    "name": "ic_visibility",
+    "source": "app/src/main/res/drawable/ic_visibility.xml",
+    "source_sha256": "7c62f5744687e789ab6dcb6869e4f25f6edb84141640a667c9230ecbc09387c1",
+    "svg_sha256": "870ae92fe39b6ad0ede5c5a44c45889a86557f69f9be3dba22245bc426171b85"
+  },
+  {
+    "name": "ic_visibility_off",
+    "source": "app/src/main/res/drawable/ic_visibility_off.xml",
+    "source_sha256": "9f07a14e382b4727b58eea26bd2a76d3d033f9a7c7b58e22982e57bfc1705a99",
+    "svg_sha256": "101064fb8ebddf22772d78941e3cd07e1f211509bce955686bf0268918845d2c"
+  },
+  {
+    "name": "ic_widget_bluetooth",
+    "source": "app/src/main/res/drawable/ic_widget_bluetooth.xml",
+    "source_sha256": "baea716e5cd6c8c34d4e42ef9ee13591a5a54cbf7633360b6c2f0d0f59d937fc",
+    "svg_sha256": "44f36cda504d67a57e388bb933f63de79fe437af69d12187b630917d05aaf7b6"
+  },
+  {
+    "name": "ic_widget_card",
+    "source": "app/src/main/res/drawable/ic_widget_card.xml",
+    "source_sha256": "1015d1ae9cf9e4881f1c9e04b867dbe3cf31a21a92ed8786eadfae15aedf4819",
+    "svg_sha256": "1ab9bc7da355145138008917b74a46c0ee7ef9bcca163960ca79027af3aca861"
+  },
+  {
+    "name": "ic_widget_chevron",
+    "source": "app/src/main/res/drawable/ic_widget_chevron.xml",
+    "source_sha256": "1d32d711d86b6829cce3b810d4c47de37f80e04f2b6308818dcd2cee20c995bb",
+    "svg_sha256": "5aa5cc15831afa04f4b48c227a29d26e045fc992197f2d4e885f85df743cf9e2"
+  },
+  {
+    "name": "ic_widget_clock",
+    "source": "app/src/main/res/drawable/ic_widget_clock.xml",
+    "source_sha256": "d875b0a996b9192fef0423b5d44aaec874968ac94ae4bf312e4ab68b93db4626",
+    "svg_sha256": "dc86ca34b7e83c4d86b5e4767e610e2565f7fe0d042fe6ab7e18eb8f696add69"
+  },
+  {
+    "name": "ic_widget_faucet",
+    "source": "app/src/main/res/drawable/ic_widget_faucet.xml",
+    "source_sha256": "301bdba1ac93a92ce0511b30eeccbffab2a11f2a43a60aeef1eb867f7f519e79",
+    "svg_sha256": "e22391a57536c27be2117c6dd822f174fdf94fff5ad690d92a459fa0058bb527"
+  },
+  {
+    "name": "ic_widget_lock",
+    "source": "app/src/main/res/drawable/ic_widget_lock.xml",
+    "source_sha256": "7ec7355eef78835ba0873fa064fb9311db37fa9fe404c1285b21aab0021e5493",
+    "svg_sha256": "eaa2bd33d0881e20a5878d66fbcd6eaf5b630ebc86e46fd4cf43731f0d076455"
+  },
+  {
+    "name": "ic_widget_power",
+    "source": "app/src/main/res/drawable/ic_widget_power.xml",
+    "source_sha256": "f65813df2591e3b41660b31bd66f04943e0f3db24b538e058a49200fb4b0890a",
+    "svg_sha256": "e2663e8d8171fc505139d77ef2cfff1e8bf663ac14bc8bea861d4fe04eefce70"
+  },
+  {
+    "name": "ic_widget_shower",
+    "source": "app/src/main/res/drawable/ic_widget_shower.xml",
+    "source_sha256": "8aa15b6e11491a7e3c6a038da026e5a678dbb4ea7e46ddf7537ef26fd01dfb7c",
+    "svg_sha256": "1940bff96d1be898c1975940c77b6e42e5de133c36cf812c1f4e55a52483b181"
+  },
+  {
+    "name": "ic_widget_stop",
+    "source": "app/src/main/res/drawable/ic_widget_stop.xml",
+    "source_sha256": "c69680ae89174b3d53e9c2cf49f8ee21979fe9f270705d68d7b5a5914a972790",
+    "svg_sha256": "b3d781f3f57cf7d8a8f35808c6b3e8cda3ad2184dcbe7f2abbb7082d8b217172"
+  },
+  {
+    "name": "home",
+    "source": "https://raw.githubusercontent.com/google/material-design-icons/master/src/action/home/materialicons/24px.svg",
+    "svg_sha256": "99da329970f65dbf03ce2450ac8c613caac4ca53523fd2da1be4421a49f376a3"
+  },
+  {
+    "name": "person",
+    "source": "https://raw.githubusercontent.com/google/material-design-icons/master/src/social/person/materialicons/24px.svg",
+    "svg_sha256": "b3a98217a56e54c9ec91138f1c22c0c85163407c955dfd0c8c46b9192e5667f5"
+  },
+  {
+    "name": "settings",
+    "source": "https://raw.githubusercontent.com/google/material-design-icons/master/src/action/settings/materialicons/24px.svg",
+    "svg_sha256": "86a35d4b8dd844c6a89f6b195b1600367cb52b8465847a0e7bbc8b3365c3983d"
+  },
+  {
+    "name": "refresh",
+    "source": "https://raw.githubusercontent.com/google/material-design-icons/master/src/navigation/refresh/materialicons/24px.svg",
+    "svg_sha256": "48954ebff577688aa2c6d5816133726035103938ab766f6f8763a5da6d0e5fb9"
+  },
+  {
+    "name": "arrow_back",
+    "source": "https://raw.githubusercontent.com/google/material-design-icons/master/src/navigation/arrow_back/materialicons/24px.svg",
+    "svg_sha256": "e1590e051f577d02ec994e7cc6005a2bc96407a3d1ba2d7ce6825fb80402684c"
+  },
+  {
+    "name": "arrow_forward",
+    "source": "https://raw.githubusercontent.com/google/material-design-icons/master/src/navigation/arrow_forward/materialicons/24px.svg",
+    "svg_sha256": "2f48309fb6ccc7b38a6412757801cd7d07e40b492f64e7146e8899d5a0e7c39a"
+  },
+  {
+    "name": "arrow_upward",
+    "source": "https://raw.githubusercontent.com/google/material-design-icons/master/src/navigation/arrow_upward/materialicons/24px.svg",
+    "svg_sha256": "473799e3e3c53c8f7417f80fe797cf6c2a55886cc415f8a7972b8e55abd82ec1"
+  },
+  {
+    "name": "arrow_downward",
+    "source": "https://raw.githubusercontent.com/google/material-design-icons/master/src/navigation/arrow_downward/materialicons/24px.svg",
+    "svg_sha256": "61643262c55c5fe4022407585d2609a7e3e73420ff93267931148a5eb9782790"
+  },
+  {
+    "name": "close",
+    "source": "https://raw.githubusercontent.com/google/material-design-icons/master/src/navigation/close/materialicons/24px.svg",
+    "svg_sha256": "b54342456d5a7f2da53795147f8af36ec76fbf5b57d792fe75f07538e6c6783e"
+  },
+  {
+    "name": "phone",
+    "source": "https://raw.githubusercontent.com/google/material-design-icons/master/src/communication/phone/materialicons/24px.svg",
+    "svg_sha256": "cb75e86ed3368dd8d73c44152f8c9ddfe143765921fb90ed60ea2c7de79c03e8"
+  },
+  {
+    "name": "lock",
+    "source": "https://raw.githubusercontent.com/google/material-design-icons/master/src/action/lock/materialicons/24px.svg",
+    "svg_sha256": "33b9bc04d9e69c5f4eb8ea5d49b240c4fdc1da973c7571235cbca1fa6f80394d"
+  },
+  {
+    "name": "check",
+    "source": "https://raw.githubusercontent.com/google/material-design-icons/master/src/navigation/check/materialicons/24px.svg",
+    "svg_sha256": "3f622661988927d85b134f07b0aa7842aeb404c71735d3c32f31de6c695b8d31"
+  },
+  {
+    "name": "edit",
+    "source": "https://raw.githubusercontent.com/google/material-design-icons/master/src/image/edit/materialicons/24px.svg",
+    "svg_sha256": "2301568113724db8d9e6c1cdf649d16af34da24e223a1f6a295d867a2b2037c9"
+  },
+  {
+    "name": "search",
+    "source": "https://raw.githubusercontent.com/google/material-design-icons/master/src/action/search/materialicons/24px.svg",
+    "svg_sha256": "c25d4cdca9972ef7ed9f8e9f32553d0444afd6a7cf8cc6ca9eebf5b4073ef308"
+  },
+  {
+    "name": "error",
+    "source": "https://raw.githubusercontent.com/google/material-design-icons/master/src/alert/error/materialicons/24px.svg",
+    "svg_sha256": "f54a85491fe6508849e9b8cf7de88eca054f34e0f3d4026214de66a2b99c9ccc"
+  },
+  {
+    "name": "bluetooth",
+    "source": "https://raw.githubusercontent.com/google/material-design-icons/master/src/device/bluetooth/materialicons/24px.svg",
+    "svg_sha256": "eebb4d73c5433705523c53c0c4c4353c1afe0f21b5d8d38cee9ef532d01db3be"
+  },
+  {
+    "name": "info",
+    "source": "https://raw.githubusercontent.com/google/material-design-icons/master/src/action/info/materialicons/24px.svg",
+    "svg_sha256": "5e3fe070eee9ca124d7591296c8052943d43d412aa25193284e7fde535180aa7"
+  },
+  {
+    "name": "expand_less",
+    "source": "https://raw.githubusercontent.com/google/material-design-icons/master/src/navigation/expand_less/materialicons/24px.svg",
+    "svg_sha256": "efb91e27877995bfd1070ac4e5d06d3179dcba5ceef7f05fa42d9e84bcd26149"
+  },
+  {
+    "name": "expand_more",
+    "source": "https://raw.githubusercontent.com/google/material-design-icons/master/src/navigation/expand_more/materialicons/24px.svg",
+    "svg_sha256": "fe0ef658114738f046347758fc2f00dddd7e98fadc930048e34675d9153472ac"
+  },
+  {
+    "name": "chevron_right",
+    "source": "https://raw.githubusercontent.com/google/material-design-icons/master/src/navigation/chevron_right/materialicons/24px.svg",
+    "svg_sha256": "927f3948559fc75c26f4f84ec09bd1eec1e92f5ddafbea26e4a821d06c2d0dc1"
+  },
+  {
+    "name": "share",
+    "source": "https://raw.githubusercontent.com/google/material-design-icons/master/src/social/share/materialicons/24px.svg",
+    "svg_sha256": "2f89f820a37732b02b2cb1c3c6441dfa210b7c846e2c6c078e4575b18f46fd4f"
+  },
+  {
+    "name": "delete",
+    "source": "https://raw.githubusercontent.com/google/material-design-icons/master/src/action/delete/materialicons/24px.svg",
+    "svg_sha256": "5f0d4f6a9d1b779ad4063d8ccb799ae4352ba0785a978230113d473115961140"
+  },
+  {
+    "name": "file_download",
+    "source": "https://raw.githubusercontent.com/google/material-design-icons/master/src/file/file_download/materialicons/24px.svg",
+    "svg_sha256": "f36ef37a9435741781187cd25129ff3b74636806c4d19383a4dfe707b6046fa0"
+  },
+  {
+    "name": "keyboard_arrow_right",
+    "source": "https://raw.githubusercontent.com/google/material-design-icons/master/src/hardware/keyboard_arrow_right/materialicons/24px.svg",
+    "svg_sha256": "71c66829a0072e89b93e0e387f3cc0a5d17e622dc0265515000751c97bbb097b"
+  },
+  {
+    "name": "keyboard_arrow_down",
+    "source": "https://raw.githubusercontent.com/google/material-design-icons/master/src/hardware/keyboard_arrow_down/materialicons/24px.svg",
+    "svg_sha256": "680870053d36b699868cddae3b34e8ae5ce454c8ec4bfe0aeeb5cff79c69e10e"
+  },
+  {
+    "name": "keyboard_arrow_up",
+    "source": "https://raw.githubusercontent.com/google/material-design-icons/master/src/hardware/keyboard_arrow_up/materialicons/24px.svg",
+    "svg_sha256": "955b98f2dfb26733fac30ea1a8feaee7313cb734993b64f25a07edb6877c3260"
+  }
+]

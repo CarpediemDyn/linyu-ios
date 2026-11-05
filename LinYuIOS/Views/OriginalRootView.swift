@@ -150,36 +150,6 @@ import Charts
     }
 }
 
-@MainActor extension OriginalPreferences {
-    func viewBinding<Value>(_ keyPath: ReferenceWritableKeyPath<OriginalPreferences, Value>) -> Binding<Value> {
-        Binding(get: { self[keyPath: keyPath] }, set: { self[keyPath: keyPath] = $0 })
-    }
-}
-
-struct OriginalGlassCard<Content: View>: View {
-    let content: Content
-    init(@ViewBuilder content: () -> Content) { self.content = content() }
-    var body: some View {
-        content.padding(20).frame(maxWidth: .infinity, alignment: .leading)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
-            .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.28), lineWidth: 0.8))
-    }
-}
-
-@MainActor struct OriginalBackground: View {
-    @ObservedObject var preferences: OriginalPreferences
-    let shower: Bool
-    var body: some View {
-        ZStack {
-            Color(.systemGroupedBackground)
-            let path = shower ? preferences.showerBackground : preferences.homeBackground
-            if let image = OriginalBackgroundPalette.background(path: path, asset: shower ? "OriginalShower" : "OriginalHome", brightness: preferences.backgroundBrightness(shower: shower)) {
-                Image(uiImage: image).resizable().scaledToFill().opacity(preferences.backgroundOpacity(shower: shower)).blur(radius: preferences.backgroundBlur(shower: shower))
-            }
-        }.ignoresSafeArea().clipped()
-    }
-}
-
 @MainActor private struct OriginalDeviceDetail: View {
     @ObservedObject var model: OriginalAppModel
     let device: CampusDevice

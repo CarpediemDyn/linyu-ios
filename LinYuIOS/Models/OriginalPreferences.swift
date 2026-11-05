@@ -26,7 +26,7 @@ import UIKit
     @Published private(set) var homeThemeRGB: Int?
     @Published private(set) var showerThemeRGB: Int?
     var accentColor: Color {
-        guard let rgb = homeThemeRGB else { return .blue }
+        guard let rgb = homeThemeRGB else { return Color(linYuHex: theme == "dark" ? 0x58A6FF : 0x2563EB) }
         return Color(red: Double((rgb >> 16) & 255) / 255, green: Double((rgb >> 8) & 255) / 255, blue: Double(rgb & 255) / 255)
     }
     @Published var opacity: Double { didSet { defaults.set(opacity, forKey: "background.\(backgroundScope).opacity") } }
@@ -40,7 +40,7 @@ import UIKit
     static let settingsCards = ["通知", "消费趋势", "背景装扮", "运行日志", "关于项目", "软件更新"]
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        theme = defaults.string(forKey: "themeMode") ?? "system"
+        theme = defaults.string(forKey: "themeMode") ?? "light"
         func flag(_ key: String) -> Bool { defaults.object(forKey: key) as? Bool ?? true }
         notifyEnabled = flag("notifyEnabled"); notifyInUse = flag("notifyInUse")
         notifyFinished = flag("notifyFinished"); notifyAutoClose = flag("notifyAutoClose"); notifyAlert = flag("notifyAlert")

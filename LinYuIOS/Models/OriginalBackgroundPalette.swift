@@ -17,12 +17,14 @@ import ImageIO
         return UIImage(cgImage: thumbnail)
     }
     static func background(path: String, asset: String, brightness: Double) -> UIImage? {
+        // assets/bg_*.png are reference screenshots, never interactive wallpaper.
+        guard !path.isEmpty, let sourceImage = UIImage(contentsOfFile: path) else { return nil }
         let modified = (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
         let imageKey = path.isEmpty ? asset : path + ":" + String(modified)
         let gain = max(0, brightness)
         let key = (imageKey + ":gain:" + String(gain)) as NSString
         if let cached = images.object(forKey: key) { return cached }
-        guard let image = UIImage(contentsOfFile: path) ?? UIImage(named: asset) else { return nil }
+        let image = sourceImage
         images.countLimit = 12; images.totalCostLimit = 64 * 1024 * 1024
         if gain == 1 {
             images.setObject(image, forKey: key, cost: (image.cgImage?.bytesPerRow ?? 0) * (image.cgImage?.height ?? 0))
