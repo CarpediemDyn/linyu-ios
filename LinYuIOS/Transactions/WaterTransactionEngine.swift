@@ -198,7 +198,7 @@ import Foundation
         // active orders do not block it. Preserve server receipts rather than discarding them.
         if var previous = pending(binding, session: session) {
             previous.valve = .closed; previous.idleConfirmed = true
-            if previous.receipt != nil {
+            if previous.receipt != nil || previous.billConfirmed == true {
                 previous.phase = .completed
                 previous.lastError = nil
                 previous.failureReportPending = false

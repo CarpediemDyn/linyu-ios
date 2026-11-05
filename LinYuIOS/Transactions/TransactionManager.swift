@@ -25,10 +25,11 @@ import Combine
     private let api = QzxyAPI()
     private var engine: WaterTransactionEngine?
 
-    init(transport: WaterMeterTransport, auth: AuthManager) {
+    init(transport: WaterMeterTransport, auth: AuthManager,
+         service: WaterMeterService? = nil, store: WaterJournalStore? = nil) {
         self.auth = auth
         do {
-            let value = try WaterTransactionEngine(transport: transport, service: api, store: KeychainWaterJournal(), decodeWriteBack: Self.decodeWriteBack)
+            let value = try WaterTransactionEngine(transport: transport, service: service ?? api, store: store ?? KeychainWaterJournal(), decodeWriteBack: Self.decodeWriteBack)
             engine = value
             value.onChange = { [weak self, weak value] in
                 guard let self, let value else { return }

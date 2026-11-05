@@ -57,11 +57,12 @@ import WidgetKit
     private var lastWidgetPayload: Data?
     private var snapshotCleared = false
 
-    init(authentication: AuthManager? = nil, network: QzxyAPI? = nil, cloudController: CloudShowerController? = nil) {
+    init(authentication: AuthManager? = nil, network: QzxyAPI? = nil, cloudController: CloudShowerController? = nil,
+         transactionManager: TransactionManager? = nil) {
         auth = authentication ?? AuthManager()
         api = network ?? QzxyAPI()
         cloud = cloudController ?? CloudShowerController(mqttEnabled: true)
-        transactions = TransactionManager(transport: ble, auth: auth)
+        transactions = transactionManager ?? TransactionManager(transport: ble, auth: auth)
         for publisher in [auth.objectWillChange.eraseToAnyPublisher(), ble.objectWillChange.eraseToAnyPublisher(),
                           transactions.objectWillChange.eraseToAnyPublisher(), cloud.objectWillChange.eraseToAnyPublisher(),
                           preferences.objectWillChange.eraseToAnyPublisher()] {

@@ -45,8 +45,16 @@ import UserNotifications
         if active { content.categoryIdentifier = "WATER_IN_USE" } else { content.sound = .default }
         center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil)) { _ in }
     }
-    func remove(id: String) { shown.removeValue(forKey: id); center.removeDeliveredNotifications(withIdentifiers: [id]) }
-    func clear() { shown = [:]; center.removeAllDeliveredNotifications() }
+    func remove(id: String) {
+        shown.removeValue(forKey: id)
+        center.removePendingNotificationRequests(withIdentifiers: [id])
+        center.removeDeliveredNotifications(withIdentifiers: [id])
+    }
+    func clear() {
+        shown = [:]
+        center.removeAllPendingNotificationRequests()
+        center.removeAllDeliveredNotifications()
+    }
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
         let text = response.notification.request.content.userInfo["url"] as? String

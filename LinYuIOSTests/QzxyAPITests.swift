@@ -441,6 +441,94 @@ import XCTest
         XCTAssertEqual(model.balance?.campusBalance, 10)
     }
 
+    func testBluetoothRecoveryUsesOneOrderScopedReadOnlyBillQuery() async throws {
+        let fixture = fixtureSession { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/order/query/account/bill/list")
+            let query = URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)
+            XCTAssertEqual(query?.queryItems?.first { $0.name == "month" }?.value, "2026-10")
+            func bill(_ order: String, _ amount: String) -> [String: Any] {
+                ["consumeBillDTO": ["orderId": "db-" + order, "orderNo": order, "consumeMoney": amount,
+                                    "consumeDate": "2026-10-01 10:00:00", "description": "测试"]]
+            }
+            return try self.response(["success": true, "data": [bill("other", "6.00"), bill("old", "0"), bill("paid", "0.41")]])
+        }
+        defer { fixture.invalidateAndCancel() }
+        let transport = TestTransport(id: UUID())
+        let store = TestJournal()
+        let engine = try WaterTransactionEngine(transport: transport, service: TestService(), store: store, decodeWriteBack: { _ in nil })
+        let binding = try await engine.pair(device: recoveryDevice, session: auth)
+        try await engine.open(binding: binding, session: auth)
+        var tx = try XCTUnwrap(engine.journal.transactions.last)
+        tx.consumeDate = "261001100000"
+        let api = QzxyAPI(session: fixture)
+        tx.orderNo = "old"
+        let placeholder = try await api.hasRecordedConsumption(tx, session: auth)
+        XCTAssertFalse(placeholder)
+        tx.orderNo = "paid"
+        let paid = try await api.hasRecordedConsumption(tx, session: auth)
+        XCTAssertTrue(paid)
+    }
+
+    func testBluetoothCloseNavigationAndWidgetShareValveState() async throws {
+        let fixture = fixtureSession { request in
+            XCTAssertEqual(request.url?.path, "/user/registerAndLogin")
+            return try self.response(["success": true, "data": ["loginCode": "fixture", "userId": 7,
+                                                           "userAccount": ["accountId": 8, "projectId": 9]]])
+        }
+        defer { fixture.invalidateAndCancel() }
+        let network = QzxyAPI(session: fixture)
+        let storage = LoginTestStorage()
+        let authentication = AuthManager(api: network, storage: storage.storage)
+        let transport = TestTransport(id: UUID())
+        let service = TestService()
+        let store = TestJournal()
+        let engine = try WaterTransactionEngine(transport: transport, service: service, store: store, decodeWriteBack: { _ in nil })
+        let binding = try await engine.pair(device: recoveryDevice, session: auth)
+        try await engine.open(binding: binding, session: auth)
+        let opened = try XCTUnwrap(engine.journal.transactions.last)
+        let manager = TransactionManager(transport: transport, auth: authentication, service: service, store: store)
+        let model = OriginalAppModel(authentication: authentication, network: network,
+                                     cloudController: CloudShowerController(api: network), transactionManager: manager)
+        await authentication.login(phone: auth.telephone, secret: "123456", usePassword: false)
+        defer { authentication.logout() }
+
+        model.showShower = opened.id
+        model.publishSnapshot()
+        XCTAssertEqual(model.activeBluetooth.map(\.id), [opened.id])
+        XCTAssertEqual(LinYuWidgetStorage.load().orders.map(\.id), [opened.id.uuidString])
+
+        transport.failCommand = 0x22
+        await model.endBluetooth(opened)
+        XCTAssertEqual(model.showShower, opened.id)
+        XCTAssertEqual(model.unconfirmedBluetooth.map(\.id), [opened.id])
+        XCTAssertTrue(model.activeBluetooth.isEmpty)
+        XCTAssertTrue(LinYuWidgetStorage.load().orders.isEmpty)
+
+        transport.failCommand = nil
+        service.failUpload = true
+        let unconfirmed = try XCTUnwrap(model.unconfirmedBluetooth.first)
+        await model.endBluetooth(unconfirmed)
+        XCTAssertNil(model.showShower)
+        let pending = try XCTUnwrap(model.unsettledBluetooth.first)
+        XCTAssertEqual(pending.phase, .uploadUnknown)
+        XCTAssertTrue(model.activeBluetooth.isEmpty)
+        XCTAssertTrue(LinYuWidgetStorage.load().orders.isEmpty)
+
+        model.showShower = pending.id
+        await model.endBluetooth(pending)
+        XCTAssertNil(model.showShower)
+        XCTAssertEqual(model.unsettledBluetooth.first?.id, pending.id)
+        XCTAssertEqual(service.uploadCalls, 1)
+        XCTAssertEqual(service.billChecks, 1)
+        XCTAssertEqual(transport.commands.filter { $0 == 0x22 }.count, 2)
+    }
+
+    private var recoveryDevice: LedgerDevice {
+        LedgerDevice(deviceId: "2564", snCode: "test-sn", name: "测试水表", macAddress: "C47F0E3E4CFD",
+                     realMac: nil, bigTypeId: "4", smallTypeId: "1")
+    }
+
     func testSMSLoginKeepsLegacyFieldsAndDecodesSharedSession() async throws {
         let fixture = fixtureSession { request in
             XCTAssertEqual(request.url?.path, "/user/registerAndLogin")
