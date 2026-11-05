@@ -89,8 +89,12 @@ import Foundation
         if reconnect { try await transport.reconnectForTransaction(to: binding.peripheralID) }
         else { try await transport.connectForTransaction(to: binding.peripheralID) }
         guard transport.peripheralID == binding.peripheralID else { throw WaterError.identity }
+        let connection = transport.connectionID
         trace?.mark("ble_ready")
         let state = try await query()
+        guard transport.peripheralID == binding.peripheralID, transport.connectionID == connection else {
+            throw WaterError.disconnected
+        }
         trace?.mark("state_received")
         guard let identity = state.identity else { throw WaterError.unsupportedIdentity }
         // UUID selects the connection; the self-reported MAC routes it to the ledger.
@@ -105,16 +109,17 @@ import Foundation
         let peripheralID: UUID
         fileprivate let connectionID: UUID
         let identity: WaterMeterIdentity
-        let state: UInt8
+        let state: UInt8?
     }
 
     private func observeAssociation() async throws -> AssociationObservation {
         guard let id = transport.peripheralID else { throw WaterError.disconnected }
         let connection = transport.connectionID
-        let state = try await query()
+        let payload = try await transport.exchange(0x23, payload: BleDeviceState.queryPayload)
         guard transport.peripheralID == id, transport.connectionID == connection else { throw WaterError.disconnected }
-        guard let identity = state.identity else { throw WaterError.unsupportedIdentity }
-        return AssociationObservation(peripheralID: id, connectionID: connection, identity: identity, state: state.state)
+        guard let identity = WaterProtocolIdentity.state(payload) else { throw WaterError.unsupportedIdentity }
+        return AssociationObservation(peripheralID: id, connectionID: connection, identity: identity,
+                                      state: BleDeviceState.parse(payload)?.state)
     }
 
     func readAssociation() async throws -> AssociationObservation {
@@ -224,15 +229,17 @@ import Foundation
             trace?.mark("close_query")
             var state = try await verified(tx.binding, session: session, reconnect: reconnect, trace: trace)
             if state.state == 1 {
-                // A recorded receipt belongs to an earlier closed session, not new running usage.
-                guard tx.receipt == nil else { throw WaterError.reconciliation }
+                // An earlier confirmed closure cannot authorize stopping new running usage.
+                guard tx.valve != .closed, tx.receipt == nil else { throw WaterError.reconciliation }
                 tx.phase = .closing; tx.valve = .unknown; tx.idleConfirmed = false; try save(tx)
                 do {
                     trace?.mark("close_sent")
                     let ack = try await transport.exchange(0x22, payload: Data([0]))
                     guard ack.first == 0x80 else { throw WaterError.invalid("关闭设备未确认，请重试") }
                 } catch {
+                    trace?.mark("close_ack_missing")
                     await reportFailureIfNeeded(&tx, session: session)
+                    trace?.mark("failure_report_finished")
                     throw error
                 }
                 trace?.mark("close_ack")

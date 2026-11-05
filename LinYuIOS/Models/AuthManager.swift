@@ -19,8 +19,8 @@ import Combine
         loginTrace = nil
     }
 
-    init(api: QzxyAPI = QzxyAPI(), storageKey: String = "user-session") {
-        self.api = api
+    init(api: QzxyAPI? = nil, storageKey: String = "user-session") {
+        self.api = api ?? QzxyAPI()
         self.storageKey = storageKey
         if let data = KeychainStore.get(storageKey) {
             session = try? JSONDecoder().decode(QzxySession.self, from: data)

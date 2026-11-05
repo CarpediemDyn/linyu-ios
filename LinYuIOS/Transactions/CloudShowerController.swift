@@ -155,6 +155,7 @@ enum CloudShowerError: LocalizedError {
         }
         guard sent.success else { throw CloudShowerError.unconfirmed("开阀响应无法确认，请核实设备状态") }
         var auto = integer(sent.data?["autoDisConTime"]) ?? 0
+        trace?.mark("confirm_wait")
         for attempt in 0...8 {
             if attempt > 0 && Date() >= deadline {
                 lastMessage = "开阀结果尚未确认，请刷新设备状态，勿重复开启"
@@ -217,7 +218,8 @@ enum CloudShowerError: LocalizedError {
             throw CloudShowerError.unconfirmed(lastMessage!)
         }
         try check(key)
-        guard response.success || response.errorCode == 307 || response.message.contains("已在") else {
+        let alreadyClosing = response.message.contains("已在关闭") || response.message.contains("已在关阀")
+        guard response.success || response.errorCode == 307 || alreadyClosing else {
             throw CloudShowerError.rejected(response.message, code: response.errorCode)
         }
         trace?.mark("close_accepted")
@@ -461,7 +463,7 @@ enum CloudShowerError: LocalizedError {
                         // Keep the original date slack, but reject another identified order.
                         if !orderNo.isEmpty, let number = text($0["orderNo"]), !number.isEmpty, number != orderNo { return false }
                         guard let raw = text($0["consumeDate"]), let date = time.date(from: raw) else { return false }
-                        return date >= order.startedAt.addingTimeInterval(-180) && date <= order.startedAt.addingTimeInterval(30)
+                        return date >= order.startedAt.addingTimeInterval(-180)
                     }.max { (text($0["consumeDate"]) ?? "") < (text($1["consumeDate"]) ?? "") }
                     if let matched {
                         sawBill = true

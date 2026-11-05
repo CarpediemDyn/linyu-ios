@@ -15,6 +15,7 @@ import SwiftUI
     private var record: WaterTransaction? { model.activeBluetooth.first { $0.id == model.showShower } }
     private var order: CloudActiveOrder? { model.currentCloud.first { $0.snCode == model.showCloudShower } }
     private var settling: Bool { model.settlingBluetooth.map { $0 == model.showShower } ?? false }
+    private var closeUnconfirmed: Bool { model.unconfirmedBluetoothClose.map { $0 == model.showShower } ?? false }
     private var hasCustomBackground: Bool { !model.preferences.showerBackground.isEmpty }
 
     private var device: CampusDevice? {
@@ -71,7 +72,7 @@ import SwiftUI
             elapsed: elapsed,
             countdown: countdown,
             hasCustomBackground: hasCustomBackground,
-            stopping: stopping,
+            stopping: stopping && !closeUnconfirmed,
             settling: settling,
             stopDisabled: stopDisabled,
             continuingSettlement: record?.valve == .closed,

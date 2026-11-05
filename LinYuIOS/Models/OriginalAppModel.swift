@@ -26,6 +26,7 @@ import WidgetKit
     @Published var working = false
     @Published private(set) var openingProgress: String?
     @Published private(set) var settlingBluetooth: UUID?
+    @Published private(set) var unconfirmedBluetoothClose: UUID?
     @Published var refreshing = false
     @Published var codeCandidate: CampusCodeCandidate?
     @Published var candidateCreatedAt: Date?
@@ -359,7 +360,7 @@ import WidgetKit
             case "connecting", "reconnecting": self?.openingProgress = "正在连接水表"
             case "ble_ready": self?.openingProgress = "正在核对设备状态"
             case "rate_request": self?.openingProgress = bluetooth ? "正在获取费率" : "正在向服务器申请开阀"
-            case "confirm_poll", "open_sent": self?.openingProgress = "正在等待设备确认"
+            case "confirm_wait", "confirm_poll", "open_sent": self?.openingProgress = "正在等待设备确认"
             default: break
             }
         }
@@ -413,12 +414,19 @@ import WidgetKit
         let trace = logs.trace("ble_close")
         trace.mark("confirmed_tap")
         trace.onStage = { [weak self] stage in
-            guard stage == "closed_saved" else { return }
-            self?.settlingBluetooth = record.id
-            self?.message = "已确认关阀，正在结算"
+            if stage == "closed_saved" {
+                self?.settlingBluetooth = record.id
+                self?.message = "已确认关阀，正在结算"
+            } else if stage == "close_ack_missing" {
+                self?.unconfirmedBluetoothClose = record.id
+                self?.message = "关闭未确认，正在保存处理结果"
+            }
         }
         working = true
-        defer { settlingBluetooth = nil; working = false; publishSnapshot() }
+        defer {
+            settlingBluetooth = nil; unconfirmedBluetoothClose = nil
+            working = false; publishSnapshot()
+        }
         if transactions.storageBlocked { await transactions.closeOnly(id: record.id, session: session) }
         else { await transactions.close(id: record.id, session: session, trace: trace) }
         if let current = transactions.journal.transactions.first(where: { $0.id == record.id }), current.valve == .closed {

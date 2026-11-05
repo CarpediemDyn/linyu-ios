@@ -42,6 +42,7 @@ struct DiscoveredWaterMeter: Identifiable, Equatable {
     private var rxBytes = Data()
     private var rxCommandToken: UUID?
     private var scanToken: UUID?
+    private var scanTrace: LatencyTrace?
     private var connectionOperation: UUID?
     private var diagnosticTask: Task<Void, Never>?
 
@@ -94,6 +95,8 @@ struct DiscoveredWaterMeter: Identifiable, Equatable {
         // Some meters omit FF00 from their advertising packet.
         central.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
         scanning = true
+        scanTrace = OriginalLogs.shared.trace("ble_scan")
+        scanTrace?.mark("scan_started")
         let token = UUID()
         scanToken = token
         DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(6)) { [weak self] in
@@ -109,7 +112,11 @@ struct DiscoveredWaterMeter: Identifiable, Equatable {
 
     private func stopScanInternally() {
         central.stopScan()
-        if scanning { meters.sort { $0.rssi > $1.rssi } }
+        if scanning {
+            meters.sort { $0.rssi > $1.rssi }
+            scanTrace?.finish(meters.isEmpty ? "no_meters" : "scan_sorted")
+            scanTrace = nil
+        }
         scanning = false
         scanToken = nil
     }
@@ -384,7 +391,10 @@ struct DiscoveredWaterMeter: Identifiable, Equatable {
         peripherals[peripheral.identifier] = peripheral
         let entry = DiscoveredWaterMeter(id: peripheral.identifier, name: name, rssi: rssi.intValue, lastSeen: Date())
         if let index = meters.firstIndex(where: { $0.id == entry.id }) { meters[index] = entry }
-        else { meters.append(entry) }
+        else {
+            meters.append(entry)
+            scanTrace?.mark("discovered")
+        }
     }
 
     fileprivate func didConnect(_ peripheral: CBPeripheral, eventID: UUID?, state: CBPeripheralState) {
