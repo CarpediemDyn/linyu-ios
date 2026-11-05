@@ -22,7 +22,7 @@ Create LinYuIOS/Views/DesignSystem/LinYuDesignSystem.swift:
 - LinYuPalette: background, card, solidSurface, primary, accent, textPrimary, textSecondary, success, warning, danger, activeBackground, surfaceVariant, border, isDark.
 - EnvironmentValues.linYuColors supplies palette; LinYuThemeHost(preferences:content:) observes existing preferences and injects it.
 - LinYuIcon(name:String,size:CGFloat=24) renders Android_<drawable-name> template assets; LinYuDeviceGlyph(emoji:String,size:CGFloat=24) maps shower/sink, fallback only for original emoji types.
-- OriginalGlassCard(padding:CGFloat=20,cornerRadius:CGFloat=22,content:) uses original palette RGBA fill and 1-point outline. No system Material replacing original RGBA.
+- OriginalGlassCard(padding:CGFloat=20,cornerRadius:CGFloat=22,content:) uses original palette RGBA fill and 0.8-point outline. No system Material replacing original RGBA.
 - LinYuButtonStyle, LinYuOutlinedButtonStyle, LinYuIconButton and LinYuSectionTitle provide original styles.
 - LinYuModal(isPresented:content:) is a view modifier for centered original dialogs with scrim, max width 560, 28 radius, 24 padding. Dialogs own their original buttons; destructive controls remain explicit.
 - LinYuPillNavigation(selection:) is 260 wide, 4 inset, 42-high horizontal icon/title items, 28 outer/22 inner radius, spring ratio .72/stiffness 380, 200ms text transition.
