@@ -8,6 +8,8 @@ import SwiftUI
     @State private var balanceDraft = ""
     @State private var initialRefreshComplete = false
     @State private var processingDates = Set<String>()
+    @State private var trendToday = Date()
+    @AppStorage("trendCollapsed") private var trendCollapsed = true
 
     private enum WalletDialog {
         case balance
@@ -37,13 +39,12 @@ import SwiftUI
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                Text(model.balance?.title ?? "余额")
-                    .font(LinYuType.font(22, weight: .bold)).foregroundStyle(colors.textPrimary)
-                    .padding(.bottom, 16)
                 balanceCard.padding(.bottom, 24)
                 if model.preferences.trendEnabled {
                     OriginalSpendingTrendCard(bills: model.bills, loading: model.refreshing && !billsAvailable,
-                                              preferences: model.preferences)
+                                              today: trendToday, collapsed: $trendCollapsed,
+                                              range: model.preferences.viewBinding(\.trendRange),
+                                              chartType: model.preferences.viewBinding(\.trendType))
                         .padding(.bottom, 24)
                 }
                 billsSection
@@ -72,30 +73,14 @@ import SwiftUI
     }
 
     private var balanceCard: some View {
-        OriginalGlassCard(padding: 24, cornerRadius: 22) {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    Text("账户余额 (元)").font(LinYuType.font(14)).foregroundStyle(colors.textSecondary)
-                    Spacer()
-                    if !hasRealBalance {
-                        Button {
-                            balanceDraft = balanceValue.map(OriginalFormatting.money)
-                                ?? (model.manualBalance.isEmpty ? "0" : model.manualBalance)
-                            dialog = .balance
-                        } label: {
-                            Text("手动填写").font(LinYuType.font(13)).foregroundStyle(colors.accent)
-                                .padding(.horizontal, 6).padding(.vertical, 4)
-                                .contentShape(RoundedRectangle(cornerRadius: 6))
-                        }.buttonStyle(.plain)
-                    }
-                }
-                Text(balanceValue.map { "¥ " + OriginalFormatting.money($0) } ?? "¥ —")
-                    .font(LinYuType.font(36, weight: .bold)).foregroundStyle(colors.textPrimary)
-                    .padding(.top, 4)
-                Text(balanceSource).font(LinYuType.font(11)).foregroundStyle(colors.textSecondary)
-                    .padding(.top, 8)
-            }
-        }
+        OriginalWalletBalanceCard(title: model.balance?.title ?? "余额", balance: balanceValue,
+                                  source: balanceSource, onEdit: hasRealBalance ? nil : editBalance)
+    }
+
+    private func editBalance() {
+        balanceDraft = balanceValue.map(OriginalFormatting.money)
+            ?? (model.manualBalance.isEmpty ? "0" : model.manualBalance)
+        dialog = .balance
     }
 
     private var deductibleBills: [CampusUnpaidBill] {
@@ -115,14 +100,13 @@ import SwiftUI
         let dates = Set(bills.map(\.consumeDate))
         let unmatched = model.unpaid.filter { debt in debt.consumeDate.map { !dates.contains($0) } ?? true }
         return VStack(alignment: .leading, spacing: 0) {
-            Text("账单").font(LinYuType.font(18, weight: .bold)).foregroundStyle(colors.textPrimary)
+            OriginalWalletBillsHeading()
                 .contextMenu {
                     if !debts.isEmpty {
                         Button("全部补扣") { dialog = .deductAll(debts) }
                             .disabled(model.isBusy || !processingDates.isEmpty)
                     }
                 }
-            Text("最近20次消费记录").font(LinYuType.font(12)).foregroundStyle(colors.textSecondary)
             if model.refreshing {
                 OriginalWaterSpinner(size: 24, color: colors.accent)
                     .frame(maxWidth: .infinity).padding(24).padding(.top, 12)
@@ -166,39 +150,8 @@ import SwiftUI
     }
 
     private func billRow(_ bill: CampusBill, debt: CampusUnpaidBill?) -> some View {
-        OriginalGlassCard(padding: 0, cornerRadius: 14) {
-            HStack(spacing: 8) {
-                Button { dialog = .detail(bill) } label: {
-                    HStack(spacing: 8) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("\(bill.emoji) \(bill.displayDesc)")
-                                .font(LinYuType.font(14, weight: .medium)).foregroundStyle(colors.textPrimary)
-                            Text(bill.typeLabel).font(LinYuType.font(12)).foregroundStyle(billColor(bill))
-                            Text(String(bill.consumeDate.prefix(16)))
-                                .font(LinYuType.font(12)).foregroundStyle(colors.textSecondary)
-                        }
-                        Spacer(minLength: 0)
-                        if debt == nil { amountText(bill.consumeMoney) }
-                    }
-                    .padding(.leading, 14).padding(.vertical, 14)
-                    .padding(.trailing, debt == nil ? 14 : 0)
-                    .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                }.buttonStyle(.plain)
-                if let debt {
-                    VStack(alignment: .trailing, spacing: 6) {
-                        Button { dialog = .detail(bill) } label: { amountText(bill.consumeMoney) }
-                            .buttonStyle(.plain)
-                        deductButton(debt, amount: matchingAmount(bill, debt: debt))
-                    }.padding(.vertical, 14).padding(.trailing, 14)
-                }
-            }
-        }
-    }
-
-    private func billColor(_ bill: CampusBill) -> Color {
-        if bill.isDrinkingWater { return Color(linYuHex: 0x10B981) }
-        if bill.typeLabel.contains("洗手台") { return Color(linYuHex: 0xFF9800) }
-        return colors.accent
+        OriginalWalletBillRow(bill: bill, deduction: debt.map { deduction($0, amount: matchingAmount(bill, debt: $0)) },
+                              onSelect: { dialog = .detail(bill) })
     }
 
     private func amountText(_ money: String) -> some View {
@@ -206,20 +159,19 @@ import SwiftUI
     }
 
     private func deductButton(_ debt: CampusUnpaidBill, amount: Double?) -> some View {
+        OriginalWalletDeductButton(deduction: deduction(debt, amount: amount))
+    }
+
+    private func deduction(_ debt: CampusUnpaidBill, amount: Double?) -> OriginalWalletBillRow.Deduction {
         let processing = debt.consumeDate.map { processingDates.contains($0) } ?? false
-        return Button { dialog = .deduct(debt, amount) } label: {
-            Text(processing ? "扣款中…" : "请求代扣")
-                .font(LinYuType.font(12)).foregroundStyle(.white)
-                .padding(.horizontal, 12).frame(height: 30)
-                .background(processing ? colors.textSecondary.opacity(0.4) : colors.warning,
-                            in: RoundedRectangle(cornerRadius: 10))
-        }.buttonStyle(.plain).disabled(!debt.isDeductible || model.isBusy || !processingDates.isEmpty)
+        return .init(processing: processing, enabled: debt.isDeductible && !model.isBusy && processingDates.isEmpty,
+                     action: { dialog = .deduct(debt, amount) })
     }
 
     @ViewBuilder private var walletDialog: some View {
         switch dialog {
         case .balance: balanceDialog
-        case .detail(let bill): billDetail(bill)
+        case .detail(let bill): billDetail(bill).task(id: bill.id) { await model.loadDetail(bill) }
         case .deduct(let debt, let amount):
             OriginalDeductConfirmDialog(amount: amount, detail: debt.consumeDate ?? "",
                                        busy: model.isBusy || !deductibleBills.contains(debt) || currentAmount(debt) != amount,
@@ -266,15 +218,16 @@ import SwiftUI
     }
 
     private func billDetail(_ bill: CampusBill) -> some View {
-        LinYuDialogCard {
+        let detail = model.billDetail.flatMap { $0.orderId == bill.orderId ? $0 : nil }
+        return LinYuDialogCard {
             VStack(alignment: .leading, spacing: 16) {
                 Text("账单详情").font(LinYuType.font(24, weight: .bold))
                 VStack(spacing: 0) {
-                    detailLine("设备名", bill.displayDesc)
+                    detailLine("设备名", bill.displayDesc.isEmpty ? (detail?.description ?? "—") : bill.displayDesc)
                     detailLine("设备类型", bill.typeLabel)
                     detailLine("消费金额", "-¥ \(bill.consumeMoney)")
                     detailLine("消费时间", String(bill.consumeDate.prefix(19)))
-                    detailLine("订单号", bill.orderId)
+                    detailLine("订单号", bill.orderId.isEmpty ? (detail?.orderNo ?? bill.orderNo ?? "—") : bill.orderId)
                 }
                 Button("确定") { dialog = nil }.buttonStyle(LinYuButtonStyle())
                     .frame(maxWidth: .infinity, alignment: .trailing)
@@ -342,5 +295,117 @@ import SwiftUI
                   deductibleBills == debts, totalAmount(deductibleBills) == amount else { return }
             await model.deductAll()
         }
+    }
+}
+
+struct OriginalWalletBalanceCard: View {
+    let title: String
+    let balance: Double?
+    let source: String
+    let onEdit: (() -> Void)?
+    @Environment(\.linYuColors) private var colors
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(title).font(LinYuType.font(22, weight: .bold)).foregroundStyle(colors.textPrimary)
+            OriginalGlassCard(padding: 24, cornerRadius: 22) {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack {
+                        Text("账户余额 (元)").font(LinYuType.font(14)).foregroundStyle(colors.textSecondary)
+                        Spacer()
+                        if let onEdit {
+                            Button(action: onEdit) {
+                                Text("手动填写").font(LinYuType.font(13)).foregroundStyle(colors.accent)
+                                    .padding(.horizontal, 6).padding(.vertical, 4)
+                                    .contentShape(RoundedRectangle(cornerRadius: 6))
+                            }.buttonStyle(.plain)
+                        }
+                    }
+                    Text(balance.map { "¥ " + OriginalFormatting.money($0) } ?? "¥ —")
+                        .font(LinYuType.font(36, weight: .bold)).foregroundStyle(colors.textPrimary)
+                        .padding(.top, 4)
+                    Text(source).font(LinYuType.font(11)).foregroundStyle(colors.textSecondary)
+                        .padding(.top, 8)
+                }
+            }
+        }
+    }
+}
+
+struct OriginalWalletBillsHeading: View {
+    @Environment(\.linYuColors) private var colors
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            LinYuSectionTitle(title: "账单")
+            Text("最近20次消费记录").font(LinYuType.font(12)).foregroundStyle(colors.textSecondary)
+        }
+    }
+}
+
+struct OriginalWalletBillRow: View {
+    struct Deduction {
+        let processing: Bool
+        let enabled: Bool
+        let action: () -> Void
+    }
+
+    let bill: CampusBill
+    let deduction: Deduction?
+    let onSelect: () -> Void
+    @Environment(\.linYuColors) private var colors
+
+    var body: some View {
+        OriginalGlassCard(padding: 0, cornerRadius: 14) {
+            HStack(spacing: 8) {
+                Button(action: onSelect) {
+                    HStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(bill.emoji) \(bill.displayDesc)")
+                                .font(LinYuType.font(14, weight: .medium)).foregroundStyle(colors.textPrimary)
+                            Text(bill.typeLabel).font(LinYuType.font(12)).foregroundStyle(billColor)
+                            Text(String(bill.consumeDate.prefix(16)))
+                                .font(LinYuType.font(12)).foregroundStyle(colors.textSecondary)
+                        }
+                        Spacer(minLength: 0)
+                        if deduction == nil { amount }
+                    }
+                    .padding(.leading, 14).padding(.vertical, 14)
+                    .padding(.trailing, deduction == nil ? 14 : 0)
+                    .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                }.buttonStyle(.plain)
+                if let deduction {
+                    VStack(alignment: .trailing, spacing: 6) {
+                        Button(action: onSelect) { amount }.buttonStyle(.plain)
+                        OriginalWalletDeductButton(deduction: deduction)
+                    }.padding(.vertical, 14).padding(.trailing, 14)
+                }
+            }
+        }
+    }
+
+    private var billColor: Color {
+        if bill.isDrinkingWater { return Color(linYuHex: 0x10B981) }
+        if bill.typeLabel.contains("洗手台") { return Color(linYuHex: 0xFF9800) }
+        return colors.accent
+    }
+
+    private var amount: some View {
+        Text("-¥ \(bill.consumeMoney)").font(LinYuType.font(16, weight: .bold)).foregroundStyle(colors.danger)
+    }
+}
+
+private struct OriginalWalletDeductButton: View {
+    let deduction: OriginalWalletBillRow.Deduction
+    @Environment(\.linYuColors) private var colors
+
+    var body: some View {
+        Button(action: deduction.action) {
+            Text(deduction.processing ? "扣款中…" : "请求代扣")
+                .font(LinYuType.font(12)).foregroundStyle(.white)
+                .padding(.horizontal, 12).frame(height: 30)
+                .background(deduction.processing ? colors.textSecondary.opacity(0.4) : colors.warning,
+                            in: RoundedRectangle(cornerRadius: 10))
+        }.buttonStyle(.plain).disabled(!deduction.enabled)
     }
 }

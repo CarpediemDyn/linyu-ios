@@ -3,14 +3,15 @@ import SwiftUI
 @MainActor struct OriginalSpendingTrendCard: View {
     let bills: [CampusBill]
     let loading: Bool
-    @ObservedObject var preferences: OriginalPreferences
+    let today: Date
+    @Binding var collapsed: Bool
+    @Binding var range: String
+    @Binding var chartType: String
     @Environment(\.linYuColors) private var colors
-    @AppStorage("trendCollapsed") private var collapsed = true
     @State private var selectedIndex: Int?
-    @State private var today = Date()
 
-    private var thisMonth: Bool { preferences.trendRange == "THIS_MONTH" }
-    private var barChart: Bool { preferences.trendType == "BAR" }
+    private var thisMonth: Bool { range == "THIS_MONTH" }
+    private var barChart: Bool { chartType == "BAR" }
 
     var body: some View {
         OriginalGlassCard(padding: 18, cornerRadius: 18) {
@@ -44,7 +45,7 @@ import SwiftUI
                 }
             }
         }
-        .onChange(of: preferences.trendRange) { _ in selectedIndex = nil }
+        .onChange(of: range) { _ in selectedIndex = nil }
         .accessibilityIdentifier("linyu.wallet.trend")
     }
 
@@ -65,13 +66,13 @@ import SwiftUI
                     .foregroundStyle(point == nil ? colors.textSecondary : colors.textPrimary)
                     .lineLimit(1).frame(width: width, alignment: .leading)
                 HStack(spacing: 0) {
-                    segment("7天", active: !thisMonth, medium: true) { preferences.trendRange = "LAST_7_DAYS" }
-                    segment("本月", active: thisMonth, medium: true) { preferences.trendRange = "THIS_MONTH" }
+                    segment("7天", active: !thisMonth, medium: true) { range = "LAST_7_DAYS" }
+                    segment("本月", active: thisMonth, medium: true) { range = "THIS_MONTH" }
                 }.frame(width: width)
                 Spacer(minLength: 4).frame(width: 4)
                 HStack(spacing: 0) {
-                    segment("柱形", active: barChart, medium: false) { preferences.trendType = "BAR" }
-                    segment("折线", active: !barChart, medium: false) { preferences.trendType = "LINE" }
+                    segment("柱形", active: barChart, medium: false) { chartType = "BAR" }
+                    segment("折线", active: !barChart, medium: false) { chartType = "LINE" }
                 }.frame(width: width)
             }.frame(height: 32)
         }.frame(height: 32)
@@ -212,10 +213,20 @@ struct OriginalWaterSpinner: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        TimelineView(.animation(paused: reduceMotion)) { timeline in
-            let fraction = timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1)
-            Circle().trim(from: 0, to: 0.72).stroke(color, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                .rotationEffect(.degrees(reduceMotion ? -90 : fraction * 360))
+        Group {
+            if reduceMotion {
+                spinner(degrees: -90)
+            } else {
+                TimelineView(.animation) { timeline in
+                    let fraction = timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1)
+                    spinner(degrees: fraction * 360)
+                }
+            }
         }.frame(width: size, height: size).accessibilityLabel("正在加载")
+    }
+
+    private func spinner(degrees: Double) -> some View {
+        Circle().trim(from: 0, to: 0.72).stroke(color, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+            .rotationEffect(.degrees(degrees))
     }
 }

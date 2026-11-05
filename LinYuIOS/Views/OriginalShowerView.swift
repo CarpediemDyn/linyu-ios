@@ -39,23 +39,12 @@ import SwiftUI
     }
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .topLeading) {
-                showerBackground
-                ScrollView {
-                    TimelineView(.periodic(from: .now, by: 1)) { timeline in
-                        showerContent(at: timeline.date)
-                    }
-                    .padding(24)
-                    .frame(minHeight: geometry.size.height)
-                }
-                Button(action: onBack) {
-                    LinYuIcon(name: "arrow_back").foregroundStyle(colors.textPrimary)
-                        .frame(width: 48, height: 48).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain).padding(8)
-                .accessibilityLabel("返回（不结束用水）")
-                .accessibilityIdentifier("linyu.shower.back")
+        TimelineView(.periodic(from: .now, by: 1)) { timeline in
+            showerContent(at: timeline.date)
+        }
+        .background {
+            if hasCustomBackground {
+                OriginalBackground(preferences: model.preferences, shower: true)
             }
         }
         .linYuModal(isPresented: confirmingStop) { endUseDialog }
@@ -66,85 +55,26 @@ import SwiftUI
         .accessibilityIdentifier("linyu.shower")
     }
 
-    @ViewBuilder private var showerBackground: some View {
-        if hasCustomBackground {
-            OriginalBackground(preferences: model.preferences, shower: true)
-        } else {
-            let stops: [UInt32] = colors.isDark ? [0x1A237E, 0x283593, 0x3949AB] : [0xE3F2FD, 0xBBDEFB, 0x90CAF9]
-            LinearGradient(colors: stops.map { Color(linYuHex: $0) }, startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea().accessibilityHidden(true)
-        }
-    }
-
     private func showerContent(at date: Date) -> some View {
         let device = self.device
-        let location = device?.displayName ?? ""
         let startedAt = record?.startedAt ?? order?.startedAt
         let elapsed = startedAt.map { max(0, Int(date.timeIntervalSince($0))) } ?? 0
         let countdown = order?.autoDisconnectAt.map { max(0, Int(ceil($0.timeIntervalSince(date)))) } ?? 0
         let needsRecovery = record.map { $0.valve != .open } ?? false
-        return VStack(spacing: 0) {
-            if !hasCustomBackground {
-                LinYuDeviceGlyph(emoji: device?.emoji ?? "🚿", size: 72).foregroundStyle(.white)
-                    .padding(.bottom, 8)
-            }
-            Text(needsRecovery ? (record?.statusText ?? "") : (device?.statusText ?? "正在沐浴中"))
-                .font(LinYuType.font(22, weight: .bold)).foregroundStyle(colors.accent)
-                .multilineTextAlignment(.center)
-            Text(location).font(LinYuType.font(16)).foregroundStyle(colors.textSecondary)
-                .multilineTextAlignment(.center).padding(.top, 4)
-            preDeductCard(device?.withholdMoney).padding(.top, 32)
-            timerBadge(elapsed).padding(.top, 24)
-            if countdown > 0 { countdownBadge(countdown).padding(.top, 12) }
-            stopButton.padding(.top, 48)
-            Text("费率: 0.041元/升 · 设备: \(String(location.suffix(6)))")
-                .font(LinYuType.font(11)).foregroundStyle(colors.textSecondary)
-                .multilineTextAlignment(.center).padding(.top, 16)
-        }.frame(maxWidth: .infinity)
-    }
-
-    private func preDeductCard(_ amount: Double?) -> some View {
-        let formatted = amount.flatMap { $0.isFinite && $0 >= 0 ? OriginalFormatting.money($0) : nil } ?? "—"
-        let shape = RoundedRectangle(cornerRadius: 16)
-        return VStack(spacing: 4) {
-            Text("💧 已预扣 ¥\(formatted)")
-                .font(LinYuType.font(18, weight: .bold)).foregroundStyle(colors.accent)
-            Text("计费以热水器显示为准").font(LinYuType.font(12)).foregroundStyle(colors.textSecondary)
-        }.padding(20).frame(maxWidth: .infinity)
-            .background(colors.card, in: shape)
-            .overlay(shape.strokeBorder(.white.opacity(colors.isDark ? 0.18 : 0.6), lineWidth: 1))
-    }
-
-    private func timerBadge(_ seconds: Int) -> some View {
-        HStack(spacing: 8) {
-            Text("⏱").font(LinYuType.font(18))
-            Text("已用 \(timeText(seconds))").font(LinYuType.font(16, weight: .medium))
-                .foregroundStyle(colors.textPrimary)
-        }.padding(.horizontal, 20).padding(.vertical, 10)
-            .background(Color(linYuHex: colors.isDark ? 0x1D232E : 0xFFFFFF, alpha: 0.6),
-                        in: RoundedRectangle(cornerRadius: 12))
-    }
-
-    private func countdownBadge(_ seconds: Int) -> some View {
-        HStack(spacing: 8) {
-            Text("⏳").font(LinYuType.font(18))
-            Text("闲置约 \(timeText(seconds)) 后自动关闭").font(LinYuType.font(13))
-                .foregroundStyle(colors.warning)
-        }.padding(.horizontal, 20).padding(.vertical, 10)
-            .background(colors.warning.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
-    }
-
-    private var stopButton: some View {
-        Button(action: requestStop) {
-            HStack(spacing: 8) {
-                if stopping { OriginalWaterSpinner(size: 20, color: .white) }
-                Text(stopping ? "正在关闭..." : record?.valve == .closed ? "继 续 结 算" : "结 束 使 用")
-                    .font(LinYuType.font(18, weight: .bold)).tracking(4)
-            }.foregroundStyle(.white).frame(maxWidth: .infinity).frame(height: 56)
-                .background(Color(linYuHex: 0xE53935, alpha: stopDisabled ? 0.4 : 1), in: Capsule())
-                .shadow(color: .black.opacity(0.24), radius: 4, y: 2)
-        }.buttonStyle(.plain).disabled(stopDisabled)
-            .accessibilityIdentifier("linyu.shower.stop")
+        return OriginalShowerContent(
+            emoji: device?.emoji ?? "🚿",
+            status: needsRecovery ? (record?.statusText ?? "") : (device?.statusText ?? "正在沐浴中"),
+            location: device?.displayName ?? "",
+            preDeduct: device?.withholdMoney,
+            elapsed: elapsed,
+            countdown: countdown,
+            hasCustomBackground: hasCustomBackground,
+            stopping: stopping,
+            stopDisabled: stopDisabled,
+            continuingSettlement: record?.valve == .closed,
+            onBack: onBack,
+            onStop: requestStop
+        )
     }
 
     private var endUseDialog: some View {
@@ -194,6 +124,108 @@ import SwiftUI
         } else {
             onBack()
         }
+    }
+}
+
+struct OriginalShowerContent: View {
+    let emoji: String
+    let status: String
+    let location: String
+    let preDeduct: Double?
+    let elapsed: Int
+    let countdown: Int
+    let hasCustomBackground: Bool
+    let stopping: Bool
+    let stopDisabled: Bool
+    let continuingSettlement: Bool
+    let onBack: () -> Void
+    let onStop: () -> Void
+    @Environment(\.linYuColors) private var colors
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .topLeading) {
+                if !hasCustomBackground {
+                    let stops: [UInt32] = colors.isDark ? [0x1A237E, 0x283593, 0x3949AB] : [0xE3F2FD, 0xBBDEFB, 0x90CAF9]
+                    LinearGradient(colors: stops.map { Color(linYuHex: $0) }, startPoint: .top, endPoint: .bottom)
+                        .ignoresSafeArea().accessibilityHidden(true)
+                }
+                ScrollView {
+                    details.padding(24).frame(minHeight: geometry.size.height)
+                }
+                Button(action: onBack) {
+                    LinYuIcon(name: "arrow_back").foregroundStyle(colors.textPrimary)
+                        .frame(width: 48, height: 48).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).padding(8)
+                .accessibilityLabel("返回（不结束用水）")
+                .accessibilityIdentifier("linyu.shower.back")
+            }
+        }
+    }
+
+    private var details: some View {
+        VStack(spacing: 0) {
+            if !hasCustomBackground {
+                LinYuDeviceGlyph(emoji: emoji, size: 72).foregroundStyle(.white)
+                    .padding(.bottom, 8)
+            }
+            Text(status).font(LinYuType.font(22, weight: .bold)).foregroundStyle(colors.accent)
+                .multilineTextAlignment(.center)
+            Text(location).font(LinYuType.font(16)).foregroundStyle(colors.textSecondary)
+                .multilineTextAlignment(.center).padding(.top, 4)
+            preDeductCard(preDeduct).padding(.top, 32)
+            timerBadge(elapsed).padding(.top, 24)
+            if countdown > 0 { countdownBadge(countdown).padding(.top, 12) }
+            stopButton.padding(.top, 48)
+            Text("费率: 0.041元/升 · 设备: \(String(location.suffix(6)))")
+                .font(LinYuType.font(11)).foregroundStyle(colors.textSecondary)
+                .multilineTextAlignment(.center).padding(.top, 16)
+        }.frame(maxWidth: .infinity)
+    }
+
+    private func preDeductCard(_ amount: Double?) -> some View {
+        let formatted = amount.flatMap { $0.isFinite && $0 >= 0 ? OriginalFormatting.money($0) : nil } ?? "—"
+        let shape = RoundedRectangle(cornerRadius: 16)
+        return VStack(spacing: 4) {
+            Text("💧 已预扣 ¥\(formatted)")
+                .font(LinYuType.font(18, weight: .bold)).foregroundStyle(colors.accent)
+            Text("计费以热水器显示为准").font(LinYuType.font(12)).foregroundStyle(colors.textSecondary)
+        }.padding(20).frame(maxWidth: .infinity)
+            .background(colors.card, in: shape)
+            .overlay(shape.strokeBorder(.white.opacity(colors.isDark ? 0.18 : 0.6), lineWidth: 1))
+    }
+
+    private func timerBadge(_ seconds: Int) -> some View {
+        HStack(spacing: 8) {
+            Text("⏱").font(LinYuType.font(18))
+            Text("已用 \(timeText(seconds))").font(LinYuType.font(16, weight: .medium))
+                .foregroundStyle(colors.textPrimary)
+        }.padding(.horizontal, 20).padding(.vertical, 10)
+            .background(Color(linYuHex: colors.isDark ? 0x1D232E : 0xFFFFFF, alpha: 0.6),
+                        in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func countdownBadge(_ seconds: Int) -> some View {
+        HStack(spacing: 8) {
+            Text("⏳").font(LinYuType.font(18))
+            Text("闲置约 \(timeText(seconds)) 后自动关闭").font(LinYuType.font(13))
+                .foregroundStyle(colors.warning)
+        }.padding(.horizontal, 20).padding(.vertical, 10)
+            .background(colors.warning.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var stopButton: some View {
+        Button(action: onStop) {
+            HStack(spacing: 8) {
+                if stopping { OriginalWaterSpinner(size: 20, color: .white) }
+                Text(stopping ? "正在关闭..." : continuingSettlement ? "继 续 结 算" : "结 束 使 用")
+                    .font(LinYuType.font(18, weight: .bold)).tracking(4)
+            }.foregroundStyle(.white).frame(maxWidth: .infinity).frame(height: 56)
+                .background(Color(linYuHex: 0xE53935, alpha: stopDisabled ? 0.4 : 1), in: Capsule())
+                .shadow(color: .black.opacity(0.24), radius: 4, y: 2)
+        }.buttonStyle(.plain).disabled(stopDisabled)
+            .accessibilityIdentifier("linyu.shower.stop")
     }
 
     private func timeText(_ seconds: Int) -> String {
