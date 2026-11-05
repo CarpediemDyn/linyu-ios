@@ -19,6 +19,38 @@ import XCTest
         return (engine, ble, api, store)
     }
 
+    func testLatencyFixtureForIdentificationAndValveLifecycle() async throws {
+        let (engine, ble, api, _) = try make()
+        ble.commandDelay = 30_000_000
+        ble.reconnectDelay = 100_000_000
+        api.rateDelay = 60_000_000
+        api.uploadDelay = 150_000_000
+
+        let identify = LatencyTrace("mock_identify", report: { print($0) })
+        identify.mark("tap")
+        try await ble.connectForTransaction(to: meterID)
+        identify.mark("ble_ready")
+        _ = try await ble.exchange(0x23, payload: Data([0]))
+        identify.mark("state_received")
+        try await Task.sleep(nanoseconds: 80_000_000)
+        identify.mark("ledger_received")
+        let binding = try await engine.pair(device: device, session: session)
+        identify.finish("detail_ready")
+
+        let open = LatencyTrace("mock_ble_open", report: { print($0) })
+        open.mark("tap")
+        try await engine.open(binding: binding, session: session, trace: open)
+        open.finish("shower_ready")
+
+        let tx = try XCTUnwrap(engine.journal.transactions.last)
+        let close = LatencyTrace("mock_ble_close", report: { print($0) })
+        close.mark("confirmed_tap")
+        try await engine.closeAndSettle(id: tx.id, session: session, trace: close)
+        close.mark("closing_indicator_ended")
+        close.finish("settled")
+        XCTAssertEqual(engine.journal.transactions.last?.phase, .completed)
+    }
+
     func testShortFrameIdentityUsesCommonSelfReportedPrefix() throws {
         let state = try XCTUnwrap(BleDeviceState.parse(Data(hex: "800000020100000A0400004BB5C47F0E3E4CFD000000000001000000")!))
         XCTAssertEqual(state.identity?.projectId, "513")
@@ -369,6 +401,8 @@ import XCTest
 }
 
 @MainActor final class TestService: WaterMeterService {
+    var rateDelay: UInt64 = 0
+    var uploadDelay: UInt64 = 0
     var rateCalls = 0
     var uploadCalls = 0
     var failureCalls = 0
@@ -380,12 +414,14 @@ import XCTest
     var onRate: (() -> Void)?
     func grantRate(device: LedgerDevice, state: BleDeviceState, session: QzxySession) async throws -> RateGrant {
         rateCalls += 1
+        if rateDelay > 0 { try await Task.sleep(nanoseconds: rateDelay) }
         if rejectRate { throw WaterError.rejected("insufficient balance") }
         onRate?()
         return RateGrant(downData: Data([0x10]), consumeDate: consumeDate, orderNo: "test-order")
     }
     func uploadConsumption(_ payload: Data, state: BleDeviceState, session: QzxySession) async throws -> SettlementReceipt {
         uploadCalls += 1; uploaded = payload
+        if uploadDelay > 0 { try await Task.sleep(nanoseconds: uploadDelay) }
         if failUpload { throw WaterError.disconnected }
         return SettlementReceipt(clData: "test-cipher", amountRaw: "123")
     }
@@ -409,6 +445,8 @@ import XCTest
     var consumptionOverride: Data?
     var lastConsumption: Data?
     var failCommand: UInt8?
+    var commandDelay: UInt64 = 0
+    var reconnectDelay: UInt64 = 0
     var commands: [UInt8] = []
     var onOpening: (() -> Void)?
     var reconnected = false
@@ -419,13 +457,17 @@ import XCTest
     var disconnectCalls = 0
     init(id: UUID) { peripheralID = id }
     func connectForTransaction(to id: UUID) async throws { peripheralID = id }
-    func reconnectForTransaction(to id: UUID) async throws { peripheralID = id; connectionID = UUID(); reconnected = true }
+    func reconnectForTransaction(to id: UUID) async throws {
+        if reconnectDelay > 0 { try await Task.sleep(nanoseconds: reconnectDelay) }
+        peripheralID = id; connectionID = UUID(); reconnected = true
+    }
     func disconnect() { disconnectCalls += 1 }
     func put(_ value: UInt32, into bytes: inout [UInt8], at offset: Int) {
         for i in 0..<4 { bytes[offset + i] = UInt8((value >> (24 - i * 8)) & 255) }
     }
     func exchange(_ command: UInt8, payload: Data) async throws -> Data {
         commands.append(command)
+        if commandDelay > 0 { try await Task.sleep(nanoseconds: commandDelay) }
         if command == 0x21 { onOpening?() }
         if command == 0x86 && loseWriteBackACK {
             loseWriteBackACK = false; state = 0

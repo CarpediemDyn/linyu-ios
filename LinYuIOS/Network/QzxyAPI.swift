@@ -58,21 +58,25 @@ struct QzxyAPI: WaterMeterService {
         guard r.success else { throw QzxyError.server(r.message) }
     }
 
-    func loginWithSMS(phone: String, code: String) async throws -> QzxySession {
+    func loginWithSMS(phone: String, code: String, trace: LatencyTrace? = nil) async throws -> QzxySession {
         let response = try await request("/user/registerAndLogin", post: [
             "telephone": phone, "smsCode": code, "type": "5",
             "phoneSystem": "android", "version": apiVersion
-        ])
-        return try loginData(from: response, phone: phone)
+        ], trace: trace)
+        let validated = try loginData(from: response, phone: phone)
+        await trace?.mark("session_validated")
+        return validated
     }
 
-    func loginWithPassword(phone: String, password: String) async throws -> QzxySession {
+    func loginWithPassword(phone: String, password: String, trace: LatencyTrace? = nil) async throws -> QzxySession {
         let hash = String(KailuSigner.md5(password).suffix(10)).uppercased()
         let response = try await request("/user/login", post: [
             "telephone": phone, "password": hash, "phoneSystem": "android",
             "type": "0", "version": apiVersion
-        ])
-        return try loginData(from: response, phone: phone)
+        ], trace: trace)
+        let validated = try loginData(from: response, phone: phone)
+        await trace?.mark("session_validated")
+        return validated
     }
 
     func wallet(session: QzxySession) async throws -> QzxyResponse {
@@ -265,7 +269,7 @@ struct QzxyAPI: WaterMeterService {
 
     private func request(_ path: String, query: [String: String] = [:],
                          post: [String: String]? = nil,
-                         session: QzxySession? = nil) async throws -> QzxyResponse {
+                         session: QzxySession? = nil, trace: LatencyTrace? = nil) async throws -> QzxyResponse {
         var fields = query
         let authentication: [String: String]
         if let session = session {
@@ -290,7 +294,9 @@ struct QzxyAPI: WaterMeterService {
             let merged = post.merging(authentication, uniquingKeysWith: { old, _ in old })
             request.httpBody = formEncoded(merged)
         }
+        await trace?.mark("request_started")
         let (data, response) = try await client.data(for: request)
+        await trace?.mark("response_received")
         if let http = response as? HTTPURLResponse, [401, 403].contains(http.statusCode) {
             throw QzxyError.server("HTTP \(http.statusCode)")
         }

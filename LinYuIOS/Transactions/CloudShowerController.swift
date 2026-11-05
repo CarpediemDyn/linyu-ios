@@ -101,7 +101,7 @@ enum CloudShowerError: LocalizedError {
         }
     }
 
-    func open(snCode: String, name: String, mac: String, session: QzxySession) async throws {
+    func open(snCode: String, name: String, mac: String, session: QzxySession, trace: LatencyTrace? = nil) async throws {
         let key = use(session)
         guard !snCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw CloudShowerError.badDevice
@@ -111,7 +111,9 @@ enum CloudShowerError: LocalizedError {
         // Original duplicate behavior: a local active device is resumed, other devices remain usable.
         if active.contains(where: { $0.snCode == snCode }) { lastMessage = "已恢复正在进行的用水"; return }
         let deadline = Date().addingTimeInterval(6)
+        trace?.mark("prequery")
         let existing = try await query(snCode, session)
+        trace?.mark("prequery_received")
         try check(key)
         if running(existing) == true {
             guard existing.data?["isOwner"] as? Bool != false else { throw CloudShowerError.inUseByOthers }
@@ -121,9 +123,11 @@ enum CloudShowerError: LocalizedError {
             return
         }
         // This financial request is sent exactly once. Only read-only confirmation is polled.
+        trace?.mark("rate_request")
         let sent = try await api.originalRequest("/order/tcpDevice/downRate/rateOrder",
                                                 post: ["xfModel": "0", "snCode": snCode], session: session)
         try check(key)
+        trace?.mark("rate_received")
         guard sent.success else { throw CloudShowerError.rejected(sent.message, code: sent.errorCode) }
         var auto = integer(sent.data?["autoDisConTime"]) ?? 0
         for attempt in 0...8 {
@@ -134,12 +138,14 @@ enum CloudShowerError: LocalizedError {
             try await pause(700_000_000)
             try check(key)
             let result: QzxyResponse
+            trace?.mark("confirm_poll")
             do {
                 result = try await api.originalRequest("/order/tcpDevice/query/downRateResult",
                                                        post: ["snCode": snCode], session: session)
             } catch is CancellationError { throw CancellationError() }
             catch { continue }
             try check(key)
+            trace?.mark("confirm_received")
             let data = result.data
             if result.success && (integer(data?["state"]) == 0 || integer(data?["result"]) == 0 || text(data?["orderNo"]) != nil) {
                 if let time = integer(data?["autoDisConTime"]), time > 0 { auto = time }
@@ -153,7 +159,7 @@ enum CloudShowerError: LocalizedError {
         throw CloudShowerError.unconfirmed(lastMessage!)
     }
 
-    func close(snCode: String, session: QzxySession) async throws {
+    func close(snCode: String, session: QzxySession, trace: LatencyTrace? = nil) async throws {
         let key = use(session)
         guard !snCode.isEmpty else { throw CloudShowerError.badDevice }
         guard busy.insert(snCode).inserted else { throw CloudShowerError.busy }
@@ -161,7 +167,9 @@ enum CloudShowerError: LocalizedError {
         var order = active.first { $0.snCode == snCode }
         var number = order?.orderNo ?? ""
         if number.isEmpty {
+            trace?.mark("prequery")
             let response = try await query(snCode, session)
+            trace?.mark("prequery_received")
             try check(key)
             guard response.data?["isOwner"] as? Bool != false else { throw CloudShowerError.inUseByOthers }
             number = text(response.data?["orderNo"]) ?? ""
@@ -169,6 +177,7 @@ enum CloudShowerError: LocalizedError {
                 active[index].orderNo = number; order = active[index]; save()
             }
         }
+        trace?.mark("close_request")
         let response: QzxyResponse
         do {
             response = try await api.originalRequest("/order/tcpDevice/closeOrder",
@@ -185,7 +194,12 @@ enum CloudShowerError: LocalizedError {
         guard response.success || response.errorCode == 307 || response.message.contains("已在") else {
             throw CloudShowerError.rejected(response.message, code: response.errorCode)
         }
-        if response.success { _ = try? await query(snCode, session); try check(key) }
+        trace?.mark("close_accepted")
+        if response.success {
+            trace?.mark("postquery")
+            _ = try? await query(snCode, session); try check(key)
+            trace?.mark("postquery_received")
+        }
         // Current upstream deliberately does not poll closeOrder/result/query: accepted close is sufficient.
         active.removeAll { $0.snCode == snCode }
         orderPolls.removeValue(forKey: snCode)?.cancel()
@@ -197,7 +211,9 @@ enum CloudShowerError: LocalizedError {
         save()
         lastMessage = "关阀已受理，正在查询结算"
         if let order {
+            trace?.mark("bill_lookup")
             latestSettlementYuan = try await settle(orderNo: number, order: order, session: session, key: key)
+            trace?.mark("bill_lookup_finished")
             if let amount = latestSettlementYuan { settlementYuanByOrder[settlementKey(order)] = amount }
             lastMessage = latestSettlementYuan == nil ? "关阀已受理，结算中" : "用水已结束"
         }

@@ -10,6 +10,12 @@ import Combine
     @Published var transactionInProgress = false
 
     private let api = QzxyAPI()
+    private var loginTrace: LatencyTrace?
+
+    func homeAppeared() {
+        loginTrace?.finish("home_visible")
+        loginTrace = nil
+    }
 
     init() {
         if let data = KeychainStore.get("user-session") {
@@ -24,14 +30,17 @@ import Combine
         }
     }
 
-    func login(phone: String, secret: String, usePassword: Bool) async {
+    func login(phone: String, secret: String, usePassword: Bool, trace: LatencyTrace? = nil) async {
         await perform {
+            defer { if session == nil { trace?.finish("failed") } }
             let result: QzxySession = usePassword
-                ? try await api.loginWithPassword(phone: phone, password: secret)
-                : try await api.loginWithSMS(phone: phone, code: secret)
+                ? try await api.loginWithPassword(phone: phone, password: secret, trace: trace)
+                : try await api.loginWithSMS(phone: phone, code: secret, trace: trace)
             guard let data = try? JSONEncoder().encode(result), KeychainStore.put(data, for: "user-session") else {
                 throw QzxyError.server("登录成功，但会话未能安全保存")
             }
+            trace?.mark("session_saved")
+            loginTrace = trace
             session = result
             activity = "登录成功，可查询学校设备台账"
         }

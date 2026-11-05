@@ -86,12 +86,14 @@ import SwiftUI
         return true
     }
     private func login() {
-        guard validPhone(), !auth.loading, !(usePassword ? password : smsCode).isEmpty else { return }
+        let trace = OriginalLogs.shared.trace("login")
+        trace.mark("tap")
+        guard validPhone(), !auth.loading, !(usePassword ? password : smsCode).isEmpty else { trace.finish("ignored"); return }
         let mode = usePassword
         let secret = mode ? password : smsCode
         loggingIn = true; error = nil; auth.activity = ""
         Task {
-            await auth.login(phone: phone, secret: secret, usePassword: mode)
+            await auth.login(phone: phone, secret: secret, usePassword: mode, trace: trace)
             if mode { password = "" } else { smsCode = "" }
             loggingIn = false
             if auth.session == nil { error = loginError(auth.activity) }

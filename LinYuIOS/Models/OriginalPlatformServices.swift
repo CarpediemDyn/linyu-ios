@@ -17,6 +17,12 @@ import UserNotifications
         entries.append(entry); entries = Array(entries.suffix(300))
         if let file { try? entries.joined(separator: "\n").write(to: file, atomically: true, encoding: .utf8) }
     }
+    func trace(_ operation: String) -> LatencyTrace {
+        LatencyTrace(operation) { [weak self] line in
+            Task { @MainActor in self?.add(line) }
+        }
+    }
+
     func export() -> URL? { file }
     func clear() { entries = []; if let file { try? "".write(to: file, atomically: true, encoding: .utf8) } }
 }

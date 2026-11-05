@@ -100,7 +100,10 @@ import XCTest
         defer { session.invalidateAndCancel() }
         let manager = controller(api)
         try await manager.open(snCode: "one", name: "A", mac: "AA", session: auth)
-        try await manager.close(snCode: "one", session: auth)
+        let trace = LatencyTrace("mock_cloud_close", report: { print($0) })
+        trace.mark("confirmed_tap")
+        try await manager.close(snCode: "one", session: auth, trace: trace)
+        trace.finish("closing_indicator_ended")
         XCTAssertTrue(manager.active.isEmpty)
         XCTAssertEqual(manager.latestSettlementYuan, Decimal(string: "0.04"))
     }

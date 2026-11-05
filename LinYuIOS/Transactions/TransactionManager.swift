@@ -90,9 +90,9 @@ import Combine
         }
     }
 
-    func open(binding: MeterBinding, session: QzxySession) async {
+    func open(binding: MeterBinding, session: QzxySession, trace: LatencyTrace? = nil) async {
         await perform { engine in
-            try await engine.open(binding: binding, session: session)
+            try await engine.open(binding: binding, session: session, trace: trace)
             message = "设备已确认进入用水状态；结束时请关阀并结算"
         }
     }
@@ -103,9 +103,9 @@ import Combine
         return result
     }
 
-    func close(id: UUID, session: QzxySession) async {
+    func close(id: UUID, session: QzxySession, trace: LatencyTrace? = nil) async {
         await perform { engine in
-            try await engine.closeAndSettle(id: id, session: session)
+            try await engine.closeAndSettle(id: id, session: session, trace: trace)
             message = engine.journal.transactions.first(where: { $0.id == id })?.statusText ?? "请核对交易状态"
         }
     }

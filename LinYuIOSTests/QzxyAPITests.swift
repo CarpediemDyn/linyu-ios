@@ -305,7 +305,10 @@ import XCTest
             ]])
         }
         defer { fixture.invalidateAndCancel() }
-        let result = try await QzxyAPI(session: fixture).loginWithSMS(phone: auth.telephone, code: "12+34")
+        let trace = LatencyTrace("mock_sms_response", report: { print($0) })
+        trace.mark("tap")
+        let result = try await QzxyAPI(session: fixture).loginWithSMS(phone: auth.telephone, code: "12+34", trace: trace)
+        trace.finish("validated")
         XCTAssertEqual(result.ownerScope, "9:8:7")
         XCTAssertEqual(result.loginCode, "token+one")
     }

@@ -118,10 +118,13 @@ import Foundation
             writeBack: nil, failureReportPending: false, lastError: nil, updatedAt: Date())
     }
 
-    func open(binding: MeterBinding, session: QzxySession) async throws {
+    func open(binding: MeterBinding, session: QzxySession, trace: LatencyTrace? = nil) async throws {
         try begin(); defer { end() }
+        trace?.mark("connecting")
         try await transport.reconnectForTransaction(to: binding.peripheralID)
+        trace?.mark("ble_ready")
         let state = try await verified(binding, session: session)
+        trace?.mark("state_received")
         if [3, 6].contains(state.state) {
             var tx = pending(binding, session: session) ?? newRecord(binding: binding, state: state)
             try save(tx)
@@ -153,7 +156,9 @@ import Foundation
         tx.phase = .rateRequested
         try save(tx)
         do {
+            trace?.mark("rate_request")
             let grant = try await service.grantRate(device: binding.device, state: state, session: session)
+            trace?.mark("rate_received")
             guard !grant.downData.isEmpty, grant.downData.count <= 252 else {
                 throw WaterError.invalid("服务端费率数据无效，已停止启动")
             }
@@ -165,8 +170,10 @@ import Foundation
             try Task.checkCancellation()
             tx.phase = .opening; tx.valve = .unknown
             try save(tx)
+            trace?.mark("open_sent")
             let ack = try await transport.exchange(0x21, payload: grant.downData)
             guard ack.first == 0x80 else { throw WaterError.invalid("未能确认设备已开启，请确认水流状态后决定是否重试") }
+            trace?.mark("open_ack")
             // Upstream's writeRate ACK is the successful open outcome; no extra query is required.
             tx.phase = .running; tx.valve = .open; tx.lastError = nil
             tx.startedAt = Date()
@@ -179,7 +186,7 @@ import Foundation
         }
     }
 
-    func closeAndSettle(id: UUID, session: QzxySession) async throws {
+    func closeAndSettle(id: UUID, session: QzxySession, trace: LatencyTrace? = nil) async throws {
         try begin(); defer { end() }
         var tx = try record(id, session: session)
         guard tx.isPending else { return }
@@ -187,27 +194,35 @@ import Foundation
             if [WaterPhase.uploadUnknown, .collected, .writeBackPending].contains(tx.phase) {
                 try await transport.reconnectForTransaction(to: tx.binding.peripheralID)
             }
+            trace?.mark("close_query")
             var state = try await verified(tx.binding, session: session)
+            trace?.mark("state_received")
             if state.state == 1 {
                 // A recorded receipt belongs to an earlier closed session, not new running usage.
                 guard tx.receipt == nil else { throw WaterError.reconciliation }
                 tx.phase = .closing; tx.valve = .unknown; tx.idleConfirmed = false; try save(tx)
                 do {
+                    trace?.mark("close_sent")
                     let ack = try await transport.exchange(0x22, payload: Data([0]))
                     guard ack.first == 0x80 else { throw WaterError.invalid("关闭设备未确认，请重试") }
                 } catch {
                     await reportFailureIfNeeded(&tx, session: session)
                     throw error
                 }
+                trace?.mark("close_ack")
                 // The close ACK is a valve fact even if reconnection later fails.
                 tx.valve = .closed; tx.phase = .closed; try save(tx)
+                trace?.mark("closed_saved")
                 transport.disconnect()
+                trace?.mark("reconnecting")
                 do { try await transport.reconnectForTransaction(to: tx.binding.peripheralID) }
                 catch {
                     try await Task.sleep(nanoseconds: 500_000_000)
                     try await transport.reconnectForTransaction(to: tx.binding.peripheralID)
                 }
+                trace?.mark("ble_ready")
                 state = try await verified(tx.binding, session: session)
+                trace?.mark("settle_state_received")
             }
             guard [0, 3, 6].contains(state.state) else { throw WaterError.invalid("设备关闭状态未确认") }
             tx.valve = .closed; tx.idleConfirmed = state.state == 0; try save(tx)
@@ -215,7 +230,7 @@ import Foundation
                 tx.phase = .completed; tx.lastError = nil; tx.failureReportPending = false; try save(tx)
                 return
             }
-            try await settle(&tx, state: state, session: session)
+            try await settle(&tx, state: state, session: session, trace: trace)
         } catch {
             tx.lastError = error.localizedDescription
             if tx.receipt != nil { tx.phase = .writeBackPending }
@@ -224,10 +239,12 @@ import Foundation
         }
     }
 
-    private func settle(_ tx: inout WaterTransaction, state: BleDeviceState, session: QzxySession) async throws {
+    private func settle(_ tx: inout WaterTransaction, state: BleDeviceState, session: QzxySession, trace: LatencyTrace? = nil) async throws {
         if tx.receipt == nil {
             do {
+                trace?.mark("collect_sent")
                 let current = try await transport.exchange(0x85, payload: Data([0]))
+                trace?.mark("collect_received")
                 guard WaterProtocolIdentity.validConsumption(current) else {
                     throw WaterError.invalid("设备返回的消费数据无效，请靠近后重试")
                 }
@@ -235,7 +252,11 @@ import Foundation
                 tx.consumption = current; tx.protocolType = state.protocolType; tx.randomNumber = state.randomNumber
                 tx.phase = .collected; try save(tx)
                 tx.phase = .uploading; try save(tx)
-                do { tx.receipt = try await service.uploadConsumption(current, state: state, session: session) }
+                trace?.mark("upload_request")
+                do {
+                    tx.receipt = try await service.uploadConsumption(current, state: state, session: session)
+                    trace?.mark("upload_received")
+                }
                 catch {
                     tx.phase = .uploadUnknown
                     if let problem = error as? WaterError, case .rejected = problem { tx.phase = .collected }
@@ -250,10 +271,10 @@ import Foundation
                 throw error
             }
         }
-        try await finishWriteBack(&tx)
+        try await finishWriteBack(&tx, trace: trace)
     }
 
-    private func finishWriteBack(_ tx: inout WaterTransaction) async throws {
+    private func finishWriteBack(_ tx: inout WaterTransaction, trace: LatencyTrace? = nil) async throws {
         guard let receipt = tx.receipt else { throw WaterError.invalid("服务端结算凭据缺失") }
         tx.phase = .writeBackPending; try save(tx)
         if tx.writeBack == nil {
@@ -265,8 +286,10 @@ import Foundation
             tx.writeBack = bytes; try save(tx)
         }
         do {
+            trace?.mark("writeback_sent")
             let ack = try await transport.exchange(0x86, payload: tx.writeBack!)
             guard ack.first == 0x80 else { throw WaterError.invalid("服务器已记账，设备清账未确认") }
+            trace?.mark("writeback_ack")
             tx.writeBackAcknowledged = true
             tx.phase = .completed; tx.valve = .closed; tx.failureReportPending = false; tx.lastError = nil
             // A writeBack ACK clears the record in the original. Do not invent a final idle query.
