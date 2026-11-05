@@ -50,6 +50,7 @@ enum CloudShowerError: LocalizedError {
     private struct Saved: Codable {
         var orders: [String: CloudActiveOrder]
         var pending: [PendingSettlement]
+        var unknownOpens: Set<String>?
     }
     private let api: QzxyAPI
     private let defaults: UserDefaults
@@ -59,6 +60,7 @@ enum CloudShowerError: LocalizedError {
     private var accountKey: String?
     private var currentSession: QzxySession?
     private var pending: [PendingSettlement] = []
+    private var unknownOpens: Set<String> = []
     private var busy: Set<String> = []
     private var refreshing = false
     private var monitor: Task<Void, Never>?
@@ -91,6 +93,7 @@ enum CloudShowerError: LocalizedError {
         } else {
             active = []
             pending = []
+            unknownOpens = []
             busy = []
             refreshing = false
             accountKey = nil
@@ -119,16 +122,38 @@ enum CloudShowerError: LocalizedError {
             guard existing.data?["isOwner"] as? Bool != false else { throw CloudShowerError.inUseByOthers }
             ensure(snCode: snCode, name: name, mac: mac, orderNo: text(existing.data?["orderNo"]) ?? "",
                    auto: integer(existing.data?["autoDisConTime"]) ?? 0)
+            if unknownOpens.remove(snCode) != nil { save() }
             lastMessage = "已恢复正在进行的用水"
             return
         }
-        // This financial request is sent exactly once. Only read-only confirmation is polled.
+        if unknownOpens.contains(snCode) {
+            // The first retry is read-only, even after an app restart. Require a new user action
+            // after the server reports idle; ambiguous prequeries cannot clear the stored intent.
+            if running(existing) == false {
+                unknownOpens.remove(snCode); save()
+                throw CloudShowerError.unconfirmed("服务端当前未查到用水订单，请确认没有出水后再开启")
+            }
+            throw CloudShowerError.unconfirmed("上次开阀结果仍未确认，请核实设备状态")
+        }
+        // Write the intent before the one financial request. Confirmation is read-only.
+        unknownOpens.insert(snCode); save()
         trace?.mark("rate_request")
-        let sent = try await api.originalRequest("/order/tcpDevice/downRate/rateOrder",
+        let sent: QzxyResponse
+        do {
+            sent = try await api.originalRequest("/order/tcpDevice/downRate/rateOrder",
                                                 post: ["xfModel": "0", "snCode": snCode], session: session)
+        } catch is CancellationError { throw CancellationError() }
+        catch {
+            try check(key)
+            throw CloudShowerError.unconfirmed("开阀请求结果未知，请核实设备状态")
+        }
         try check(key)
         trace?.mark("rate_received")
-        guard sent.success else { throw CloudShowerError.rejected(sent.message, code: sent.errorCode) }
+        if sent.explicitSuccess == false {
+            unknownOpens.remove(snCode); save()
+            throw CloudShowerError.rejected(sent.message, code: sent.errorCode)
+        }
+        guard sent.success else { throw CloudShowerError.unconfirmed("开阀响应无法确认，请核实设备状态") }
         var auto = integer(sent.data?["autoDisConTime"]) ?? 0
         for attempt in 0...8 {
             if attempt > 0 && Date() >= deadline {
@@ -149,6 +174,7 @@ enum CloudShowerError: LocalizedError {
             let data = result.data
             if result.success && (integer(data?["state"]) == 0 || integer(data?["result"]) == 0 || text(data?["orderNo"]) != nil) {
                 if let time = integer(data?["autoDisConTime"]), time > 0 { auto = time }
+                unknownOpens.remove(snCode)
                 ensure(snCode: snCode, name: name, mac: mac, orderNo: text(data?["orderNo"]) ?? "", auto: auto)
                 lastMessage = "开阀已确认"
                 fillOrderNo(snCode: snCode, session: session, key: key)
@@ -195,12 +221,8 @@ enum CloudShowerError: LocalizedError {
             throw CloudShowerError.rejected(response.message, code: response.errorCode)
         }
         trace?.mark("close_accepted")
-        if response.success {
-            trace?.mark("postquery")
-            _ = try? await query(snCode, session); try check(key)
-            trace?.mark("postquery_received")
-        }
-        // Current upstream deliberately does not poll closeOrder/result/query: accepted close is sufficient.
+        // Upstream uses acceptance to leave the use screen. Its optional status read
+        // is diagnostic only, so it need not be on this path.
         active.removeAll { $0.snCode == snCode }
         orderPolls.removeValue(forKey: snCode)?.cancel()
         if var stopped = order {
@@ -210,13 +232,7 @@ enum CloudShowerError: LocalizedError {
         }
         save()
         lastMessage = "关阀已受理，正在查询结算"
-        if let order {
-            trace?.mark("bill_lookup")
-            latestSettlementYuan = try await settle(orderNo: number, order: order, session: session, key: key)
-            trace?.mark("bill_lookup_finished")
-            if let amount = latestSettlementYuan { settlementYuanByOrder[settlementKey(order)] = amount }
-            lastMessage = latestSettlementYuan == nil ? "关阀已受理，结算中" : "用水已结束"
-        }
+        trace?.mark("closed_saved")
     }
 
     /// Query at startup after a use-code/physical device is resolved. Does not issue an open request.
@@ -247,7 +263,8 @@ enum CloudShowerError: LocalizedError {
             do {
                 let response = try await query(order.snCode, session)
                 try check(key)
-                guard !busy.contains(order.snCode) else { continue }
+                guard !busy.contains(order.snCode),
+                      active.contains(where: { $0.snCode == order.snCode && $0.startedAt == order.startedAt }) else { continue }
                 if running(response) == false || response.data?["isOwner"] as? Bool == false {
                     active.removeAll { $0.snCode == order.snCode }
                     if response.data?["isOwner"] as? Bool != false {
@@ -264,13 +281,16 @@ enum CloudShowerError: LocalizedError {
         }
         // Pending includes uncertain zero-consumption conclusions for later bill reconciliation.
         for item in pending where !busy.contains(item.order.snCode) {
+            let trace = OriginalLogs.shared.trace("cloud_settlement")
+            trace.mark("bill_lookup")
             do {
                 if let amount = try await settle(orderNo: item.order.orderNo, order: item.order, session: session, key: key) {
                     latestSettlementYuan = amount
                     settlementYuanByOrder[settlementKey(item.order)] = amount
                 }
-            } catch is CancellationError { return }
-            catch { }
+                trace.finish(pending.contains(item) ? "pending" : "settled")
+            } catch is CancellationError { trace.finish("cancelled"); return }
+            catch { trace.finish("pending") }
             guard accountKey == key else { return }
         }
     }
@@ -355,6 +375,7 @@ enum CloudShowerError: LocalizedError {
             let saved = defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(Saved.self, from: $0) }
             active = saved.map { Array($0.orders.values).sorted { $0.startedAt < $1.startedAt } } ?? []
             pending = saved?.pending ?? []
+            unknownOpens = saved?.unknownOpens ?? []
         }
         currentSession = session
         return key
@@ -367,7 +388,7 @@ enum CloudShowerError: LocalizedError {
 
     private func save() {
         guard let accountKey,
-              let data = try? JSONEncoder().encode(Saved(orders: Dictionary(uniqueKeysWithValues: active.map { ($0.snCode, $0) }), pending: pending)) else { return }
+              let data = try? JSONEncoder().encode(Saved(orders: Dictionary(uniqueKeysWithValues: active.map { ($0.snCode, $0) }), pending: pending, unknownOpens: unknownOpens)) else { return }
         defaults.set(data, forKey: accountKey)
     }
 
@@ -436,8 +457,11 @@ enum CloudShowerError: LocalizedError {
                     let exact = orderNo.isEmpty ? nil : (dtos.first { text($0["orderNo"]) == orderNo } ?? dtos.first { text($0["orderId"]) == orderNo })
                     let time = DateFormatter(); time.locale = Locale(identifier: "en_US_POSIX"); time.dateFormat = "yyyy-MM-dd HH:mm:ss"
                     let matched = exact ?? dtos.filter {
+                        // A newer order can be opened while this amount is being reconciled.
+                        // Keep the original date slack, but reject another identified order.
+                        if !orderNo.isEmpty, let number = text($0["orderNo"]), !number.isEmpty, number != orderNo { return false }
                         guard let raw = text($0["consumeDate"]), let date = time.date(from: raw) else { return false }
-                        return date >= order.startedAt.addingTimeInterval(-180)
+                        return date >= order.startedAt.addingTimeInterval(-180) && date <= order.startedAt.addingTimeInterval(30)
                     }.max { (text($0["consumeDate"]) ?? "") < (text($1["consumeDate"]) ?? "") }
                     if let matched {
                         sawBill = true

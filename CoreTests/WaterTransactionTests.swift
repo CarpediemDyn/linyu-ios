@@ -20,7 +20,7 @@ import XCTest
     }
 
     func testLatencyFixtureForIdentificationAndValveLifecycle() async throws {
-        let (engine, ble, api, _) = try make()
+        let (engine, ble, api, store) = try make()
         ble.commandDelay = 30_000_000
         ble.reconnectDelay = 100_000_000
         api.rateDelay = 60_000_000
@@ -30,25 +30,67 @@ import XCTest
         identify.mark("tap")
         try await ble.connectForTransaction(to: meterID)
         identify.mark("ble_ready")
-        _ = try await ble.exchange(0x23, payload: Data([0]))
+        let proof = try await engine.readAssociation()
         identify.mark("state_received")
         try await Task.sleep(nanoseconds: 80_000_000)
         identify.mark("ledger_received")
-        let binding = try await engine.pair(device: device, session: session)
+        let binding = try await engine.pair(device: device, session: session, observation: proof)
         identify.finish("detail_ready")
+        XCTAssertEqual(ble.commands, [0x23])
 
         let open = LatencyTrace("mock_ble_open", report: { print($0) })
         open.mark("tap")
         try await engine.open(binding: binding, session: session, trace: open)
         open.finish("shower_ready")
+        XCTAssertFalse(ble.reconnected)
+        XCTAssertEqual(ble.commands, [0x23, 0x23, 0x21])
 
         let tx = try XCTUnwrap(engine.journal.transactions.last)
         let close = LatencyTrace("mock_ble_close", report: { print($0) })
         close.mark("confirmed_tap")
+        var confirmedBeforeSettlement = false
+        close.onStage = { stage in
+            guard stage == "closed_saved" else { return }
+            XCTAssertEqual(store.snapshot.transactions.last?.valve, .closed)
+            XCTAssertNil(store.snapshot.transactions.last?.receipt)
+            XCTAssertEqual(api.uploadCalls, 0)
+            confirmedBeforeSettlement = true
+            close.onStage = nil
+            close.mark("closing_indicator_ended")
+        }
         try await engine.closeAndSettle(id: tx.id, session: session, trace: close)
-        close.mark("closing_indicator_ended")
         close.finish("settled")
+        XCTAssertTrue(confirmedBeforeSettlement)
         XCTAssertEqual(engine.journal.transactions.last?.phase, .completed)
+    }
+
+    func testAssociationRejectsAnObservationFromAnotherConnection() async throws {
+        let (engine, ble, _, _) = try make()
+        let proof = try await engine.readAssociation()
+        try await ble.reconnectForTransaction(to: meterID)
+        do {
+            _ = try await engine.pair(device: device, session: session, observation: proof)
+            XCTFail("An observation survived a connection change")
+        } catch WaterError.identity {}
+        XCTAssertTrue(engine.journal.bindings.isEmpty)
+    }
+
+    func testClosedACKPersistsAcrossRelaunchBeforeCollection() async throws {
+        let (engine, ble, api, store) = try make()
+        let binding = try await engine.pair(device: device, session: session)
+        try await engine.open(binding: binding, session: session)
+        let tx = try XCTUnwrap(engine.journal.transactions.last)
+        ble.failCommand = 0x85
+        do { try await engine.closeAndSettle(id: tx.id, session: session); XCTFail("Collection should fail") } catch WaterError.timeout {}
+        XCTAssertEqual(store.snapshot.transactions.last?.valve, .closed)
+
+        ble.failCommand = nil
+        let restored = try WaterTransactionEngine(transport: ble, service: api, store: store, decodeWriteBack: { _ in Data([1]) })
+        try await restored.recover(id: tx.id, session: session)
+        XCTAssertEqual(ble.commands.filter { $0 == 0x22 }.count, 1)
+        XCTAssertTrue(ble.reconnectedBeforeCollect)
+        XCTAssertEqual(api.uploadCalls, 1)
+        XCTAssertEqual(store.snapshot.transactions.last?.phase, .completed)
     }
 
     func testShortFrameIdentityUsesCommonSelfReportedPrefix() throws {

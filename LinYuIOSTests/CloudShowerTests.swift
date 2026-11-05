@@ -90,22 +90,50 @@ import XCTest
         XCTAssertTrue(manager.active.isEmpty)
     }
 
-    func testAcceptedCloseDoesOneStatusQueryAndConvertsMilliYuan() async throws {
+    func testUnknownOpenPersistsAndRetryOnlyRechecksBeforeAnyNewRequest() async throws {
+        let defaults = preferences()
+        let (api, session) = fixture([
+            Step(using, json: ["success": true]),
+            Step(rate, failure: URLError(.timedOut)),
+            Step(using, json: ["success": true])
+        ])
+        defer { session.invalidateAndCancel() }
+        let manager = controller(api, defaults)
+        do {
+            try await manager.open(snCode: "one", name: "A", mac: "AA", session: auth)
+            XCTFail("A timeout must remain unconfirmed")
+        } catch CloudShowerError.unconfirmed {}
+        let restored = controller(api, defaults)
+        do {
+            try await restored.open(snCode: "one", name: "A", mac: "AA", session: auth)
+            XCTFail("Rechecking must not issue a new open")
+        } catch CloudShowerError.unconfirmed {}
+        XCTAssertTrue(restored.active.isEmpty)
+    }
+
+    func testAcceptedCloseReturnsBeforeBillLookupAndPersistsPendingSettlement() async throws {
         let (api, session) = fixture([
             Step(using, json: ["success": false, "errorCode": 307, "data": ["orderNo": "old"]]),
             Step(close, json: ["success": true]),
-            Step(using, json: ["success": true, "data": ["orderNo": "old"]]),
             Step(consume, json: ["success": true, "data": ["consumeMoney": 40]])
         ])
         defer { session.invalidateAndCancel() }
-        let manager = controller(api)
+        let defaults = preferences()
+        let manager = controller(api, defaults)
         try await manager.open(snCode: "one", name: "A", mac: "AA", session: auth)
         let trace = LatencyTrace("mock_cloud_close", report: { print($0) })
         trace.mark("confirmed_tap")
         try await manager.close(snCode: "one", session: auth, trace: trace)
         trace.finish("closing_indicator_ended")
         XCTAssertTrue(manager.active.isEmpty)
-        XCTAssertEqual(manager.latestSettlementYuan, Decimal(string: "0.04"))
+        XCTAssertNil(manager.latestSettlementYuan)
+        let restored = controller(api, defaults)
+        let settlement = LatencyTrace("mock_cloud_settlement", report: { print($0) })
+        settlement.mark("bill_lookup")
+        await restored.refresh(session: auth)
+        settlement.finish("settled")
+        XCTAssertTrue(restored.active.isEmpty)
+        XCTAssertEqual(restored.latestSettlementYuan, Decimal(string: "0.04"))
     }
 
     func testFailedCloseTransportRetainsOriginalStartedAt() async throws {
@@ -136,6 +164,7 @@ import XCTest
         try await manager.open(snCode: "one", name: "A", mac: "AA", session: auth)
         try await manager.close(snCode: "one", session: auth)
         XCTAssertTrue(manager.active.isEmpty)
+        await manager.refresh(session: auth)
         XCTAssertEqual(manager.latestSettlementYuan, Decimal(string: "0.04"))
     }
 
@@ -143,9 +172,10 @@ import XCTest
         let (api, session) = fixture([
             Step(using, json: ["success": false, "errorCode": 307, "data": ["orderNo": "first"]]),
             Step(using, json: ["success": false, "errorCode": 307, "data": ["orderNo": "second"]]),
-            Step(close, json: ["success": true]), Step(using, json: ["success": true]),
+            Step(close, json: ["success": true]),
+            Step(using, json: ["success": false, "errorCode": 307, "data": ["orderNo": "second"]]),
             Step(consume, json: ["success": true, "data": ["consumeMoney": 40]]),
-            Step(close, json: ["success": true]), Step(using, json: ["success": true]),
+            Step(close, json: ["success": true]),
             Step(consume, json: ["success": true, "data": ["consumeMoney": 80]])
         ])
         defer { session.invalidateAndCancel() }
@@ -156,9 +186,11 @@ import XCTest
         let second = try XCTUnwrap(manager.active.first { $0.snCode == "two" })
         XCTAssertNil(manager.settlementAmount(for: first))
         try await manager.close(snCode: "one", session: auth)
+        await manager.refresh(session: auth)
         XCTAssertEqual(manager.settlementAmount(for: first), Decimal(string: "0.04"))
         XCTAssertNil(manager.settlementAmount(for: second))
         try await manager.close(snCode: "two", session: auth)
+        await manager.refresh(session: auth)
         XCTAssertEqual(manager.latestSettlementYuan, Decimal(string: "0.08"))
         XCTAssertEqual(manager.settlementAmount(for: first), Decimal(string: "0.04"))
         XCTAssertEqual(manager.settlementAmount(for: second), Decimal(string: "0.08"))
@@ -183,13 +215,14 @@ import XCTest
         try await manager.open(snCode: "one", name: "A", mac: "AA", session: auth)
         try await manager.close(snCode: "one", session: auth)
         XCTAssertTrue(manager.active.isEmpty)
+        await manager.refresh(session: auth)
         XCTAssertEqual(manager.latestSettlementYuan, Decimal(string: "0.08"))
     }
 
     func testZeroWithPlaceholderBillRemainsUnknownAndBillYuanIsNotDivided() async throws {
         let base = [
             Step(using, json: ["success": false, "errorCode": 307, "data": ["orderNo": "old"]]),
-            Step(close, json: ["success": true]), Step(using, json: ["success": true]),
+            Step(close, json: ["success": true]),
             Step(consume, json: ["success": true, "data": ["consumeMoney": 0]]),
             Step(consume, json: ["success": true, "data": ["consumeMoney": 0]]),
             Step(consume, json: ["success": true, "data": ["consumeMoney": 0]])
@@ -200,6 +233,7 @@ import XCTest
             let manager = controller(api)
             try await manager.open(snCode: "one", name: "A", mac: "AA", session: auth)
             try await manager.close(snCode: "one", session: auth)
+            await manager.refresh(session: auth)
             if finalAmount == "0.0" { XCTAssertNil(manager.latestSettlementYuan) }
             else { XCTAssertEqual(manager.latestSettlementYuan, Decimal(string: "0.41")) }
             session.invalidateAndCancel()

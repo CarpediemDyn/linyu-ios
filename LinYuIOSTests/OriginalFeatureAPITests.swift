@@ -291,6 +291,48 @@ import XCTest
         XCTAssertEqual(try device.ledgerDevice.smallTypeId, "0")
     }
 
+    func testVerifiedDisplayMetadataSurvivesRelaunchAndExpiresPerAccount() throws {
+        let suite = "CampusMeterDisplayCacheTests." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let id = UUID()
+        let now = Date()
+        let meter = CampusDevice(deviceId: "one", deviceName: "学生公寓 D7 四层 450", snCode: "fixture")
+        var cache = CampusMeterDisplayCache(ownerScope: auth.ownerScope, defaults: defaults)
+        cache.store(meter, for: id, now: now)
+
+        let restored = CampusMeterDisplayCache(ownerScope: auth.ownerScope, defaults: defaults)
+        let trace = LatencyTrace("mock_cached_identify", report: { print($0) })
+        trace.mark("tap")
+        XCTAssertEqual(restored.device(for: id, now: now.addingTimeInterval(10)), meter)
+        trace.finish("display_cache_hit")
+        XCTAssertNil(restored.device(for: id, now: now.addingTimeInterval(86_401)))
+        XCTAssertNil(restored.device(for: UUID(), now: now))
+        let other = CampusMeterDisplayCache(ownerScope: "another-account", defaults: defaults)
+        XCTAssertNil(other.device(for: id, now: now))
+    }
+
+    func testDeviceLookupCoalescesConcurrentAndRecentRequests() async throws {
+        let lookup = CampusDeviceLookup(ownerScope: auth.ownerScope)
+        let meter = CampusDevice(deviceId: "one", deviceName: "测试水表", snCode: "fixture")
+        var calls = 0
+        let load: () async throws -> CampusDevice? = {
+            calls += 1
+            try await Task.sleep(nanoseconds: 30_000_000)
+            return meter
+        }
+        let session = auth
+        let first = Task { try await lookup.device(for: "CA:FE:12:34:56:78", session: session, load: load) }
+        let second = Task { try await lookup.device(for: "cafe12345678", session: session, load: load) }
+        let firstDevice = try await first.value
+        let secondDevice = try await second.value
+        let cached = try await lookup.device(for: "CAFE12345678", session: session, load: load)
+        XCTAssertEqual(firstDevice, meter)
+        XCTAssertEqual(secondDevice, meter)
+        XCTAssertEqual(cached, meter)
+        XCTAssertEqual(calls, 1)
+    }
+
     func testDeviceCacheExpiresAndCannotCrossAccounts() async {
         var cache = CampusDeviceCache(ownerScope: auth.ownerScope)
         let now = Date()

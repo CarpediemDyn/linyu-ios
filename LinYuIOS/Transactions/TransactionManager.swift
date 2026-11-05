@@ -21,13 +21,11 @@ import Combine
     @Published private(set) var storageBlocked = false
     @Published private(set) var failureMessage: String?
     @Published private(set) var serverRejected = false
-    private let transport: WaterMeterTransport
     private weak var auth: AuthManager?
     private let api = QzxyAPI()
     private var engine: WaterTransactionEngine?
 
     init(transport: WaterMeterTransport, auth: AuthManager) {
-        self.transport = transport
         self.auth = auth
         do {
             let value = try WaterTransactionEngine(transport: transport, service: api, store: KeychainWaterJournal(), decodeWriteBack: Self.decodeWriteBack)
@@ -73,15 +71,14 @@ import Combine
 
     func pair(session: QzxySession, ledgerMAC: String) async {
         await perform { engine in
-            let payload = try await transport.exchange(0x23, payload: Data([0]))
-            guard let identity = BleDeviceState.parse(payload)?.identity else { throw WaterError.unsupportedIdentity }
+            let proof = try await engine.readAssociation()
             let candidates = ledgerMAC.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? engine.lookupMACs(identity.macAddress) : [ledgerMAC]
+                ? engine.lookupMACs(proof.identity.macAddress) : [ledgerMAC]
             var lastError: Error = WaterError.identity
             for address in candidates {
                 do {
                     let device = try await api.ledgerDevice(ledgerMAC: address, session: session)
-                    _ = try await engine.pair(device: device, session: session)
+                    _ = try await engine.pair(device: device, session: session, observation: proof)
                     message = "水表身份与台账已匹配：\(device.name)。每次操作前会重新核对。"
                     return
                 } catch { lastError = error }
@@ -97,9 +94,17 @@ import Combine
         }
     }
 
-    func associate(device: LedgerDevice, session: QzxySession) async -> MeterBinding? {
+    func readAssociation() async throws -> WaterTransactionEngine.AssociationObservation {
+        guard let engine, !working else { throw WaterError.busy }
+        return try await engine.readAssociation()
+    }
+
+    func associate(device: LedgerDevice, session: QzxySession,
+                   observation: WaterTransactionEngine.AssociationObservation) async -> MeterBinding? {
         var result: MeterBinding?
-        await perform { engine in result = try await engine.pair(device: device, session: session) }
+        await perform { engine in
+            result = try await engine.pair(device: device, session: session, observation: observation)
+        }
         return result
     }
 

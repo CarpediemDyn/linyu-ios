@@ -24,6 +24,8 @@ import WidgetKit
     @Published var showCloudShower: String?
     @Published var message = ""
     @Published var working = false
+    @Published private(set) var openingProgress: String?
+    @Published private(set) var settlingBluetooth: UUID?
     @Published var refreshing = false
     @Published var codeCandidate: CampusCodeCandidate?
     @Published var candidateCreatedAt: Date?
@@ -47,7 +49,10 @@ import WidgetKit
     private var detailGeneration = UUID()
     private var unpaidRevision: UInt64 = 0
     private var refreshAgain = false
-    private var deviceCache = CampusDeviceCache(ownerScope: "")
+    private var deviceLookup = CampusDeviceLookup(ownerScope: "")
+    private var meterDisplay: CampusMeterDisplayCache?
+    private var needsHomeHydration = false
+    private var showerTrace: LatencyTrace?
     private var lastWidgetPayload: Data?
     private var snapshotCleared = false
 
@@ -61,6 +66,13 @@ import WidgetKit
                 DispatchQueue.main.async { [weak self] in self?.publishSnapshot() }
             }.store(in: &subscriptions)
         }
+        ble.$meters.sink { [weak self] meters in
+            guard let self else { return }
+            let display = Dictionary(uniqueKeysWithValues: meters.compactMap { meter in
+                self.meterDisplay?.device(for: meter.id).map { (meter.id, $0) }
+            })
+            if self.nearby != display { self.nearby = display }
+        }.store(in: &subscriptions)
         auth.$session.dropFirst().sink { [weak self] value in self?.accountChanged(value) }.store(in: &subscriptions)
         OriginalNotifications.shared.onAction = { [weak self] url in Task { await self?.handle(url) } }
         accountChanged(auth.session)
@@ -90,22 +102,54 @@ import WidgetKit
         automaticallyEnded = []
         lastWidgetPayload = nil; snapshotCleared = false
         OriginalNotifications.shared.clear()
-        deviceCache = CampusDeviceCache(ownerScope: session?.ownerScope ?? "")
+        deviceLookup.cancel()
+        deviceLookup = CampusDeviceLookup(ownerScope: session?.ownerScope ?? "")
+        meterDisplay = nil; needsHomeHydration = false; showerTrace = nil
         billDetail = nil; manualBalance = ""; candidateClaimed = false
         automaticFinish = nil; pendingBluetoothFallback = nil; startFailure = nil
         cloud.activate(session: session)
         account = nil; balance = nil; bills = []; unpaid = []; nearby = [:]
         selectedDevice = nil; selectedPeripheral = nil; codeCandidate = nil; candidateCreatedAt = nil; showShower = nil; showCloudShower = nil
         guard let session else { publishSnapshot(); return }
+        account = CampusAccountCache(ownerScope: session.ownerScope)
+        balance = CampusBalanceSnapshot(ownerScope: session.ownerScope)
+        needsHomeHydration = true
+        // A replaced/restored session may already have a visible home.
+        if !auth.isPublishingLogin { scheduleHomeHydration(session: session) }
+    }
+
+    func homeAppeared() {
+        auth.homeAppeared()
+        if let session = auth.session { scheduleHomeHydration(session: session) }
+    }
+
+    func showerAppeared() {
+        showerTrace?.finish("shower_visible")
+        showerTrace = nil
+    }
+
+    private func scheduleHomeHydration(session: QzxySession) {
+        guard needsHomeHydration else { return }
+        needsHomeHydration = false
+        let token = generation
+        Task { [weak self] in
+            guard let self, self.generation == token else { return }
+            self.hydrateHome(session: session)
+            if self.foreground { self.startForeground() }
+            await self.refresh()
+        }
+    }
+
+    private func hydrateHome(session: QzxySession) {
+        meterDisplay = CampusMeterDisplayCache(ownerScope: session.ownerScope)
+        nearby = Dictionary(uniqueKeysWithValues: ble.meters.compactMap { meter in
+            meterDisplay?.device(for: meter.id).map { (meter.id, $0) }
+        })
         let defaults = UserDefaults.standard
         if let data = defaults.data(forKey: cacheKey("account", session)), let cached = try? JSONDecoder().decode(CampusAccountCache.self, from: data), cached.matches(session) { account = cached }
         if let data = defaults.data(forKey: cacheKey("balance", session)), let cached = try? JSONDecoder().decode(CampusBalanceSnapshot.self, from: data), cached.matches(session) {
             balance = cached; bills = cached.bills; manualBalance = cached.manualBalance
         }
-        if account == nil { account = CampusAccountCache(ownerScope: session.ownerScope) }
-        if balance == nil { balance = CampusBalanceSnapshot(ownerScope: session.ownerScope) }
-        Task { await refresh() }
-        if foreground { Task { self.startForeground() } }
     }
     private func persist() {
         guard let session = auth.session else { return }
@@ -124,6 +168,7 @@ import WidgetKit
                 if refreshAgain { refreshAgain = false; Task { await self.refresh() } }
             }
         }
+        async let cloudResult: Void = refreshCloud(session: session, token: token)
         async let profileResult = try? api.profile(session: session)
         async let walletResult = try? api.campusWallet(session: session)
         async let useCodeResult = try? api.useCode(session: session)
@@ -161,11 +206,16 @@ import WidgetKit
             bills = fetched.filter { seen.insert($0.id).inserted }.sorted { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }
             balance?.bills = bills
         }
-        persist(); await cloud.refresh(session: session)
+        persist(); await cloudResult
         if let device = account?.lastDevice, !usesBluetooth(device), generation == token {
             await cloud.discover(snCode: device.snCode, name: device.deviceName, mac: device.macAddress, session: session)
         }
         if generation == token { publishSnapshot() }
+    }
+
+    private func refreshCloud(session: QzxySession, token: UUID) async {
+        guard generation == token else { return }
+        await cloud.refresh(session: session)
     }
 
     func setForeground(_ value: Bool) {
@@ -195,30 +245,49 @@ import WidgetKit
         guard let session = auth.session, !isBusy else { return }
         let trace = logs.trace("ble_identify")
         trace.mark("tap")
+        if let discovered = ble.meters.first(where: { $0.id == meter.id }) {
+            trace.mark("seen_to_tap_\(max(0, Int(Date().timeIntervalSince(discovered.lastSeen) * 1_000)))ms")
+        }
+        if let cached = meterDisplay?.device(for: meter.id) {
+            display(cached, peripheral: meter.id, availability: .unknown, showDetail: showDetail)
+            trace.finish("display_cache_hit")
+            return
+        }
         var result = "failed"
         working = true; let token = generation; defer { working = false; trace.finish(result) }
         do {
             trace.mark("connecting")
             try await ble.connectForTransaction(to: meter.id)
             trace.mark("ble_ready")
-            let payload = try await ble.exchange(0x23, payload: Data([0]))
+            let proof = try await transactions.readAssociation()
             trace.mark("state_received")
-            guard let identity = WaterProtocolIdentity.state(payload), let device = try await cachedDevice(identity.macAddress, session: session) else { throw WaterError.invalid("没有查到这台设备的台账") }
+            trace.mark("ledger_request")
+            guard let device = try await cachedDevice(proof.identity.macAddress, session: session) else {
+                throw WaterError.invalid("没有查到这台设备的台账")
+            }
             guard generation == token else { return }
             trace.mark("ledger_received")
-            nearby[meter.id] = device
-            if showDetail {
-                selectedDeviceAvailability = OriginalDeviceAvailability(bleState: BleDeviceState.parse(payload)?.state)
-                selectedDevice = device
+            guard await transactions.associate(device: try device.ledgerDevice, session: session, observation: proof) != nil,
+                  generation == token else {
+                if generation == token { message = transactions.message }
+                return
             }
-            selectedPeripheral = meter.id
+            trace.mark("binding_saved")
+            meterDisplay?.store(device, for: meter.id)
             setBluetooth(true, device: device)
-            _ = await transactions.associate(device: try device.ledgerDevice, session: session)
-            guard generation == token else { return }
-            trace.mark("binding_finished")
-            message = device.displayName
+            display(device, peripheral: meter.id, availability: OriginalDeviceAvailability(bleState: proof.state), showDetail: showDetail)
             result = "detail_ready"
-        } catch { report(error) }
+        } catch { if generation == token { report(error) } }
+    }
+
+    private func display(_ device: CampusDevice, peripheral: UUID, availability: OriginalDeviceAvailability, showDetail: Bool) {
+        nearby[peripheral] = device
+        selectedPeripheral = peripheral
+        if showDetail {
+            selectedDeviceAvailability = availability
+            selectedDevice = device
+        }
+        message = device.displayName
     }
 
     func scanCode(_ sn: String) async {
@@ -240,62 +309,94 @@ import WidgetKit
         device.needsBluetoothControl || UserDefaults.standard.bool(forKey: "ble-device.\(auth.session?.ownerScope ?? "").\(device.snCode)")
     }
     private func cachedDevice(_ mac: String, session: QzxySession) async throws -> CampusDevice? {
-        if let value = deviceCache.device(for: mac, session: session) { return value }
-        let value = try await api.deviceByMAC(mac, session: session)
-        if let value, auth.session?.ownerScope == session.ownerScope { deviceCache.store(value, for: mac, session: session) }
-        return value
+        try await deviceLookup.device(for: mac, session: session) { [api] in
+            try await api.deviceByMAC(mac, session: session)
+        }
     }
     func setBluetooth(_ value: Bool, device: CampusDevice) {
         UserDefaults.standard.set(value, forKey: "ble-device.\(auth.session?.ownerScope ?? "").\(device.snCode)")
         objectWillChange.send()
     }
-    private func locate(_ device: CampusDevice, session: QzxySession) async throws -> MeterBinding {
-        if let binding = transactions.journal.bindings.first(where: { $0.ownerScope == session.ownerScope && $0.device.deviceId == device.deviceId }) { return binding }
-        if ble.meters.isEmpty {
+    private func locate(_ device: CampusDevice, session: QzxySession, peripheral preferredPeripheral: UUID?) async throws -> MeterBinding {
+        let token = generation
+        if let binding = transactions.journal.bindings.first(where: {
+            $0.ownerScope == session.ownerScope && $0.device.deviceId == device.deviceId
+                && (preferredPeripheral == nil || $0.peripheralID == preferredPeripheral)
+        }) { return binding }
+        if preferredPeripheral == nil, ble.meters.isEmpty {
             ble.startScan()
             for _ in 0..<70 { if !ble.scanning { break }; try await Task.sleep(nanoseconds: 100_000_000) }
         }
-        let ids = selectedPeripheral.map { [$0] } ?? ble.meters.map(\.id)
+        let ids = preferredPeripheral.map { [$0] } ?? ble.meters.map(\.id)
         let expected = Set(OriginalFormatting.macLookupVariants(device.realMac ?? device.macAddress).compactMap(LedgerDevice.normalizeMAC))
         for id in ids {
             try Task.checkCancellation()
             do {
                 try await ble.connectForTransaction(to: id)
-                let raw = try await ble.exchange(0x23, payload: Data([0]))
-                guard let reported = WaterProtocolIdentity.state(raw),
-                      !expected.isDisjoint(with: OriginalFormatting.macLookupVariants(reported.macAddress).compactMap(LedgerDevice.normalizeMAC)) else { continue }
-                if let binding = await transactions.associate(device: try device.ledgerDevice, session: session) { nearby[id] = device; return binding }
+                let proof = try await transactions.readAssociation()
+                guard !expected.isDisjoint(with: OriginalFormatting.macLookupVariants(proof.identity.macAddress).compactMap(LedgerDevice.normalizeMAC)) else { continue }
+                guard let ledger = try await cachedDevice(proof.identity.macAddress, session: session),
+                      generation == token, ledger.deviceId == device.deviceId, ledger.snCode == device.snCode else { continue }
+                if let binding = await transactions.associate(device: try ledger.ledgerDevice, session: session, observation: proof) {
+                    meterDisplay?.store(ledger, for: id)
+                    nearby[id] = ledger
+                    return binding
+                }
             } catch is CancellationError { throw CancellationError() } catch { logs.add("定位水表：\(error.localizedDescription)") }
         }
         throw WaterError.invalid("未在附近找到该水表，请开启蓝牙并靠近设备重试")
     }
 
-    func start(_ device: CampusDevice) async {
+    func start(_ device: CampusDevice, peripheral: UUID? = nil) async {
         guard let session = auth.session, !isBusy else { return }
         let trace = logs.trace(usesBluetooth(device) ? "ble_open" : "cloud_open")
         trace.mark("start")
         var result = "failed"
+        let bluetooth = usesBluetooth(device)
+        openingProgress = bluetooth ? "正在连接水表" : "正在查询设备状态"
+        trace.onStage = { [weak self] stage in
+            switch stage {
+            case "connecting", "reconnecting": self?.openingProgress = "正在连接水表"
+            case "ble_ready": self?.openingProgress = "正在核对设备状态"
+            case "rate_request": self?.openingProgress = bluetooth ? "正在获取费率" : "正在向服务器申请开阀"
+            case "confirm_poll", "open_sent": self?.openingProgress = "正在等待设备确认"
+            default: break
+            }
+        }
         working = true; let token = generation
-        defer { working = false; trace.finish(result); publishSnapshot() }
+        if !bluetooth { auth.transactionInProgress = true }
+        defer {
+            if !bluetooth { auth.transactionInProgress = false }
+            working = false; openingProgress = nil
+            if result != "shower_ready" { trace.finish(result) }
+            publishSnapshot()
+        }
         do {
-            if usesBluetooth(device) {
-                let binding = try await locate(device, session: session)
+            if bluetooth {
+                let binding = try await locate(device, session: session, peripheral: peripheral)
                 guard generation == token else { return }
                 await transactions.open(binding: binding, session: session, trace: trace)
                 message = transactions.message
                 if let failure = transactions.failureMessage {
+                    if activeBluetooth.contains(where: { $0.binding.device.deviceId == device.deviceId && $0.valve == .unknown }) {
+                        result = "open_unconfirmed"
+                    }
                     startFailure = OriginalStartFailure(message: failure, serverRejected: transactions.serverRejected)
                     return
                 }
-                if let record = activeBluetooth.last(where: { $0.binding.device.deviceId == device.deviceId }), record.valve != .closed { showShower = record.id }
+                if let record = activeBluetooth.last(where: { $0.binding.device.deviceId == device.deviceId }), record.valve == .open {
+                    showerTrace = trace; showShower = record.id; result = "shower_ready"
+                }
             } else {
                 try await cloud.open(snCode: device.snCode, name: device.deviceName, mac: device.macAddress, session: session, trace: trace)
-                showCloudShower = device.snCode; message = cloud.lastMessage ?? "用水状态已更新"
+                guard generation == token else { return }
+                showerTrace = trace; showCloudShower = device.snCode; result = "shower_ready"
+                message = cloud.lastMessage ?? "用水状态已更新"
             }
-            if showShower != nil || showCloudShower != nil { result = "shower_ready" }
             if generation == token { account?.lastDevice = device; persist() }
         } catch {
             guard generation == token else { return }
+            if let cloudError = error as? CloudShowerError, case .unconfirmed = cloudError { result = "open_unconfirmed" }
             if let cloudError = error as? CloudShowerError, cloudError.errorCode == 306 { pendingBluetoothFallback = device }
             else {
                 let rejected: Bool
@@ -311,23 +412,50 @@ import WidgetKit
         guard let session = auth.session, !isBusy else { return }
         let trace = logs.trace("ble_close")
         trace.mark("confirmed_tap")
-        working = true; defer { working = false; publishSnapshot() }
+        trace.onStage = { [weak self] stage in
+            guard stage == "closed_saved" else { return }
+            self?.settlingBluetooth = record.id
+            self?.message = "已确认关阀，正在结算"
+        }
+        working = true
+        defer { settlingBluetooth = nil; working = false; publishSnapshot() }
         if transactions.storageBlocked { await transactions.closeOnly(id: record.id, session: session) }
         else { await transactions.close(id: record.id, session: session, trace: trace) }
-        message = transactions.message
-        if let current = transactions.journal.transactions.first(where: { $0.id == record.id }), current.valve == .closed { showShower = nil }
-        await refresh()
-        trace.finish(transactions.failureMessage == nil ? "operation_returned" : "failed")
+        if let current = transactions.journal.transactions.first(where: { $0.id == record.id }), current.valve == .closed {
+            message = current.isPending || transactions.storageBlocked
+                ? "已确认关阀，结算需要恢复：\(transactions.message)"
+                : transactions.message
+            trace.finish(current.isPending || transactions.storageBlocked ? "settlement_pending" : "settled")
+            if showShower == record.id { showShower = nil }
+            if current.receipt != nil { refreshAfterWaterOperation() }
+        } else {
+            message = "关闭未确认，请重试：\(transactions.message)"
+            trace.finish("close_unconfirmed")
+        }
     }
     func endCloud(_ sn: String) async {
         guard let session = auth.session, !isBusy else { return }
         let trace = logs.trace("cloud_close")
         trace.mark("confirmed_tap")
-        working = true; userStoppingCloud.insert(sn)
-        defer { working = false; publishSnapshot(); userStoppingCloud.remove(sn) }
-        do { try await cloud.close(snCode: sn, session: session, trace: trace); message = cloud.lastMessage ?? "用水已结束"; showCloudShower = nil; await refresh(); trace.finish("operation_returned") }
-        catch { trace.finish("failed"); report(error) }
+        working = true; userStoppingCloud.insert(sn); auth.transactionInProgress = true
+        defer { working = false; auth.transactionInProgress = false; publishSnapshot(); userStoppingCloud.remove(sn) }
+        do {
+            try await cloud.close(snCode: sn, session: session, trace: trace)
+            message = cloud.lastMessage ?? "关阀已受理，正在查询结算"
+            if showCloudShower == sn { showCloudShower = nil }
+            trace.finish("close_accepted")
+            refreshAfterWaterOperation()
+        } catch { trace.finish("close_unconfirmed"); report(error) }
     }
+
+    private func refreshAfterWaterOperation() {
+        let token = generation
+        Task { [weak self] in
+            guard let self, self.generation == token else { return }
+            await self.refresh()
+        }
+    }
+
     func bindRoom(_ name: String) { account?.boundRoom = OriginalFormatting.roomKey(name) ?? ""; persist() }
     func setManualBalance() { balance?.manualBalance = manualBalance; balance?.manualBalanceTime = Date(); persist(); publishSnapshot() }
 

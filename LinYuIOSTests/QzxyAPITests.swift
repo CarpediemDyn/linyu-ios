@@ -291,6 +291,53 @@ import XCTest
         XCTAssertEqual(count, 0)
     }
 
+    func testLoginPublishesLoadingBeforeValidationAndDeduplicatesSubmission() async throws {
+        let started = expectation(description: "Mock request started")
+        let fixture = fixtureSession { request in
+            XCTAssertEqual(request.url?.path, "/user/registerAndLogin")
+            Thread.sleep(forTimeInterval: 0.15)
+            return try self.response([
+                "success": true, "data": ["loginCode": "fixture", "userId": 7,
+                                           "userAccount": ["accountId": 8, "projectId": 9]]
+            ])
+        }
+        defer { fixture.invalidateAndCancel() }
+        let key = "test-login-" + UUID().uuidString
+        let manager = AuthManager(api: QzxyAPI(session: fixture), storageKey: key)
+        defer { manager.logout() }
+
+        let trace = LatencyTrace("mock_login_session", report: { print($0) })
+        trace.onStage = { if $0 == "request_started" { started.fulfill() } }
+        trace.mark("tap")
+        let login = Task { await manager.login(phone: "13800138000", secret: "123456", usePassword: false, trace: trace) }
+        await fulfillment(of: [started], timeout: 3)
+        XCTAssertTrue(manager.loading)
+        XCTAssertNil(manager.session)
+        XCTAssertNil(KeychainStore.get(key))
+        await manager.login(phone: "13800138000", secret: "654321", usePassword: false)
+        XCTAssertTrue(manager.loading)
+        await login.value
+        XCTAssertFalse(manager.loading)
+        XCTAssertNotNil(manager.session)
+        XCTAssertNotNil(KeychainStore.get(key))
+        manager.homeAppeared()
+    }
+
+    func testRejectedLoginDoesNotPublishOrSaveSession() async {
+        let fixture = fixtureSession { _ in
+            try self.response(["success": false, "errorMessage": "验证码错误"])
+        }
+        defer { fixture.invalidateAndCancel() }
+        let key = "test-login-" + UUID().uuidString
+        let manager = AuthManager(api: QzxyAPI(session: fixture), storageKey: key)
+        defer { manager.logout() }
+        await manager.login(phone: "13800138000", secret: "123456", usePassword: false)
+        XCTAssertNil(manager.session)
+        XCTAssertNil(KeychainStore.get(key))
+        XCTAssertFalse(manager.loading)
+        XCTAssertTrue(manager.activity.contains("验证码错误"))
+    }
+
     func testSMSLoginKeepsLegacyFieldsAndDecodesSharedSession() async throws {
         let fixture = fixtureSession { request in
             XCTAssertEqual(request.url?.path, "/user/registerAndLogin")

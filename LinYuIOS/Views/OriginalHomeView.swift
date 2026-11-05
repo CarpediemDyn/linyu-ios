@@ -48,7 +48,7 @@ import UIKit
                 Color.clear.frame(height: 110)
             }.padding(.horizontal, 20)
         }.refreshable { await refresh() }
-            .onAppear { model.auth.homeAppeared() }
+            .onAppear { model.homeAppeared() }
             .task { if CBCentralManager.authorization == .allowedAlways { model.ble.startScan() } }
             .accessibilityIdentifier("linyu.home")
     }

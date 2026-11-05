@@ -70,7 +70,7 @@ import SwiftUI
             switch page {
             case 1: OriginalWalletView(model: model, onModalVisibilityChanged: { inSettings = $0 })
             case 2: OriginalProfileView(model: model, onSettingsVisibilityChanged: { inSettings = $0 })
-            default: OriginalHomeView(model: model, onScan: { scanner = true }, onStart: start)
+            default: OriginalHomeView(model: model, onScan: { scanner = true }, onStart: { start($0) })
             }
         }
         .id(page).frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -94,7 +94,7 @@ import SwiftUI
             if let event = model.automaticFinish {
                 OriginalAutomaticCloseDialog(event: event, amount: model.confirmedFinishAmount(event)) { model.automaticFinish = nil }
             }
-        case .opening: OriginalStartingDeviceDialog()
+        case .opening: OriginalStartingDeviceDialog(progress: model.openingProgress)
         case .retry:
             if let device = model.pendingBluetoothFallback {
                 OriginalBluetoothRetryDialog(device: device, onConfirm: {
@@ -110,7 +110,9 @@ import SwiftUI
             }
         case .device:
             if let device = model.selectedDevice {
-                OriginalDeviceDetail(model: model, device: device, onStart: start) { model.selectedDevice = nil }
+                OriginalDeviceDetail(model: model, device: device, onStart: { device in
+                    start(device, peripheral: model.selectedPeripheral)
+                }) { model.selectedDevice = nil }
             }
         case nil: EmptyView()
         }
@@ -125,10 +127,10 @@ import SwiftUI
         }
     }
     private func closeShowerPage() { model.showShower = nil; model.showCloudShower = nil }
-    private func start(_ device: CampusDevice) {
+    private func start(_ device: CampusDevice, peripheral: UUID? = nil) {
         guard !opening, !model.isBusy else { return }
         opening = true
-        Task { await model.start(device); opening = false }
+        Task { await model.start(device, peripheral: peripheral); opening = false }
     }
 }
 

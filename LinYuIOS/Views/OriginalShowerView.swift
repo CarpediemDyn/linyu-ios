@@ -14,6 +14,7 @@ import SwiftUI
 
     private var record: WaterTransaction? { model.activeBluetooth.first { $0.id == model.showShower } }
     private var order: CloudActiveOrder? { model.currentCloud.first { $0.snCode == model.showCloudShower } }
+    private var settling: Bool { model.settlingBluetooth.map { $0 == model.showShower } ?? false }
     private var hasCustomBackground: Bool { !model.preferences.showerBackground.isEmpty }
 
     private var device: CampusDevice? {
@@ -48,6 +49,7 @@ import SwiftUI
             }
         }
         .linYuModal(isPresented: confirmingStop) { endUseDialog }
+        .onAppear { model.showerAppeared() }
         .interactiveDismissDisabled(stopping)
         .accessibilityAction(.escape) {
             if stopConfirmation != nil { stopConfirmation = nil } else { onBack() }
@@ -63,13 +65,14 @@ import SwiftUI
         let needsRecovery = record.map { $0.valve != .open } ?? false
         return OriginalShowerContent(
             emoji: device?.emoji ?? "🚿",
-            status: needsRecovery ? (record?.statusText ?? "") : (device?.statusText ?? "正在沐浴中"),
+            status: settling ? "已确认关阀，正在结算" : needsRecovery ? (record?.statusText ?? "") : (device?.statusText ?? "正在沐浴中"),
             location: device?.displayName ?? "",
             preDeduct: device?.withholdMoney,
             elapsed: elapsed,
             countdown: countdown,
             hasCustomBackground: hasCustomBackground,
             stopping: stopping,
+            settling: settling,
             stopDisabled: stopDisabled,
             continuingSettlement: record?.valve == .closed,
             onBack: onBack,
@@ -136,6 +139,7 @@ struct OriginalShowerContent: View {
     let countdown: Int
     let hasCustomBackground: Bool
     let stopping: Bool
+    var settling = false
     let stopDisabled: Bool
     let continuingSettlement: Bool
     let onBack: () -> Void
@@ -218,8 +222,8 @@ struct OriginalShowerContent: View {
     private var stopButton: some View {
         Button(action: onStop) {
             HStack(spacing: 8) {
-                if stopping { OriginalWaterSpinner(size: 20, color: .white) }
-                Text(stopping ? "正在关闭..." : continuingSettlement ? "继 续 结 算" : "结 束 使 用")
+                if stopping || settling { OriginalWaterSpinner(size: 20, color: .white) }
+                Text(settling ? "正在结算..." : stopping ? "正在关闭..." : continuingSettlement ? "继 续 结 算" : "结 束 使 用")
                     .font(LinYuType.font(18, weight: .bold)).tracking(4)
             }.foregroundStyle(.white).frame(maxWidth: .infinity).frame(height: 56)
                 .background(Color(linYuHex: 0xE53935, alpha: stopDisabled ? 0.4 : 1), in: Capsule())

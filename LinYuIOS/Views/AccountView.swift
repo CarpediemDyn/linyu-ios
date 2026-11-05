@@ -44,7 +44,7 @@ import SwiftUI
             Text("请使用校园账号登录").font(LinYuType.font(13)).foregroundStyle(.gray).frame(minHeight: 24).padding(.top, 4).padding(.bottom, 20)
             Button(usePassword ? "验证码登录" : "密码登录") {
                 usePassword.toggle(); error = nil; password = ""; smsCode = ""
-            }.font(LinYuType.font(13)).foregroundStyle(blue).frame(minHeight: 48).padding(.bottom, 16)
+            }.font(LinYuType.font(13)).foregroundStyle(blue).frame(minHeight: 48).padding(.bottom, 16).disabled(loggingIn)
             Text(usePassword ? "未设置密码？请使用手机号验证码登录" : "未注册的手机号将自动创建账号")
                 .font(LinYuType.font(12)).foregroundStyle(.gray).frame(minHeight: 24).padding(.bottom, 12)
             OriginalLoginField(title: "手机号", text: $phone, icon: "phone", kind: .phone)
@@ -59,11 +59,15 @@ import SwiftUI
                             .buttonStyle(.plain).disabled(sending || countdown > 0 || auth.loading)
                     }
                 }
-            }.padding(.top, 14)
+            }.padding(.top, 14).disabled(loggingIn)
             Button(action: login) {
                 Group {
-                    if loggingIn { ProgressView().tint(.white).frame(width: 22, height: 22) }
-                    else { Text("登 录").font(LinYuType.font(17, weight: .bold)) }
+                    if loggingIn {
+                        HStack(spacing: 8) {
+                            ProgressView().tint(.white).frame(width: 22, height: 22)
+                            Text("正在登录…").font(LinYuType.font(17, weight: .bold))
+                        }
+                    } else { Text("登 录").font(LinYuType.font(17, weight: .bold)) }
                 }.frame(maxWidth: .infinity).frame(height: 52)
             }.buttonStyle(.plain).foregroundStyle(.white)
                 .background {
@@ -81,19 +85,34 @@ import SwiftUI
             }
     }
     private func validPhone() -> Bool {
-        guard !phone.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
-        guard phone.count == 11 else { error = "请输入 11 位手机号"; return false }
+        guard !phone.isEmpty else { error = "请输入手机号"; return false }
+        guard phone.utf8.count == 11, phone.utf8.allSatisfy({ (48...57).contains($0) }) else {
+            error = "请输入 11 位手机号"; return false
+        }
         return true
     }
     private func login() {
         let trace = OriginalLogs.shared.trace("login")
         trace.mark("tap")
-        guard validPhone(), !auth.loading, !(usePassword ? password : smsCode).isEmpty else { trace.finish("ignored"); return }
+        guard !loggingIn, !sending, !auth.loading else { trace.finish("busy"); return }
+        guard validPhone() else { trace.finish("invalid_input"); return }
         let mode = usePassword
         let secret = mode ? password : smsCode
+        guard !secret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            error = mode ? "请输入密码" : "请输入验证码"
+            trace.finish("invalid_input")
+            return
+        }
+        if !mode, !secret.utf8.allSatisfy({ (48...57).contains($0) }) {
+            error = "请输入数字验证码"
+            trace.finish("invalid_input")
+            return
+        }
+        let number = phone
         loggingIn = true; error = nil; auth.activity = ""
+        trace.mark("feedback_requested")
         Task {
-            await auth.login(phone: phone, secret: secret, usePassword: mode, trace: trace)
+            await auth.login(phone: number, secret: secret, usePassword: mode, trace: trace)
             if mode { password = "" } else { smsCode = "" }
             loggingIn = false
             if auth.session == nil { error = loginError(auth.activity) }

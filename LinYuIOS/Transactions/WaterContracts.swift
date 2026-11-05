@@ -107,6 +107,7 @@ struct WaterTransaction: Codable, Identifiable {
         if phase == .uploading || phase == .uploadUnknown { return "已关阀，服务器处理结果待核实" }
         if valve == .closed { return "阀已关闭，结算未完成" }
         if valve == .open { return "用水中，尚未结算" }
+        if phase == .closing { return "关闭未确认，请重试" }
         return "阀门状态未确认，请恢复核实"
     }
 }

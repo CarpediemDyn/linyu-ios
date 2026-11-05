@@ -218,6 +218,65 @@ struct CampusDeviceCache {
     mutating func clear() { entries.removeAll() }
 }
 
+/// Account-scoped display metadata. Never supplies a binding or a protocol challenge.
+struct CampusMeterDisplayCache {
+    private struct Entry: Codable {
+        let device: CampusDevice
+        let verifiedAt: Date
+    }
+
+    private let defaults: UserDefaults
+    private let key: String
+    private var entries: [UUID: Entry]
+
+    init(ownerScope: String, defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        key = "ble-display-v1." + ownerScope
+        entries = defaults.data(forKey: key)
+            .flatMap { try? JSONDecoder().decode([UUID: Entry].self, from: $0) } ?? [:]
+    }
+
+    func device(for id: UUID, now: Date = Date()) -> CampusDevice? {
+        guard let entry = entries[id], (0...86_400).contains(now.timeIntervalSince(entry.verifiedAt)) else { return nil }
+        return entry.device
+    }
+
+    mutating func store(_ device: CampusDevice, for id: UUID, now: Date = Date()) {
+        entries = entries.filter { (0...86_400).contains(now.timeIntervalSince($0.value.verifiedAt)) }
+        entries[id] = Entry(device: device, verifiedAt: now)
+        if entries.count > 64, let oldest = entries.min(by: { $0.value.verifiedAt < $1.value.verifiedAt })?.key {
+            entries.removeValue(forKey: oldest)
+        }
+        if let data = try? JSONEncoder().encode(entries) { defaults.set(data, forKey: key) }
+    }
+}
+
+@MainActor final class CampusDeviceLookup {
+    private var cache: CampusDeviceCache
+    private var pending: [String: Task<CampusDevice?, Error>] = [:]
+
+    init(ownerScope: String) { cache = CampusDeviceCache(ownerScope: ownerScope) }
+
+    func device(for address: String, session: QzxySession,
+                load: @escaping () async throws -> CampusDevice?) async throws -> CampusDevice? {
+        guard cache.ownerScope == session.ownerScope else { throw WaterError.identity }
+        let key = LedgerDevice.normalizeMAC(address) ?? address
+        if let cached = cache.device(for: key, session: session) { return cached }
+        if let task = pending[key] { return try await task.value }
+        let task = Task { try await load() }
+        pending[key] = task
+        defer { pending[key] = nil }
+        let device = try await task.value
+        if let device { cache.store(device, for: key, session: session) }
+        return device
+    }
+
+    func cancel() {
+        for task in pending.values { task.cancel() }
+        cache.clear()
+    }
+}
+
 enum OriginalFormatting {
     private static func replace(_ text: String, _ pattern: String, _ replacement: String = "") -> String {
         text.replacingOccurrences(of: pattern, with: replacement, options: .regularExpression)

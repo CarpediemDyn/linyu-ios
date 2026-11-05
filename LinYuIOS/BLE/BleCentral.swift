@@ -84,6 +84,7 @@ struct DiscoveredWaterMeter: Identifiable, Equatable {
     }
 
     func startScan() {
+        guard !scanning else { return }
         guard !busy else { lastDiagnostic = WaterError.busy.localizedDescription; return }
         guard central.state == .poweredOn else {
             bluetoothStatus = "请开启蓝牙并允许应用访问"
@@ -108,6 +109,7 @@ struct DiscoveredWaterMeter: Identifiable, Equatable {
 
     private func stopScanInternally() {
         central.stopScan()
+        if scanning { meters.sort { $0.rssi > $1.rssi } }
         scanning = false
         scanToken = nil
     }
@@ -377,12 +379,12 @@ struct DiscoveredWaterMeter: Identifiable, Equatable {
     fileprivate func discovered(_ peripheral: CBPeripheral, advertisement: [String: Any], rssi: NSNumber) {
         guard scanning, connectionOperation == nil else { return }
         let name = (advertisement[CBAdvertisementDataLocalNameKey] as? String) ?? peripheral.name ?? ""
-        guard name.localizedCaseInsensitiveContains("KLCXKJ-Water") else { return }
+        let waterName = name.replacingOccurrences(of: " ", with: "-")
+        guard waterName.localizedCaseInsensitiveContains("KLCXKJ-Water") else { return }
         peripherals[peripheral.identifier] = peripheral
         let entry = DiscoveredWaterMeter(id: peripheral.identifier, name: name, rssi: rssi.intValue, lastSeen: Date())
         if let index = meters.firstIndex(where: { $0.id == entry.id }) { meters[index] = entry }
         else { meters.append(entry) }
-        meters.sort { $0.rssi > $1.rssi }
     }
 
     fileprivate func didConnect(_ peripheral: CBPeripheral, eventID: UUID?, state: CBPeripheralState) {

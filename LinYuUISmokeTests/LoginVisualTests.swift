@@ -8,6 +8,8 @@ final class LoginVisualTests: XCTestCase {
         let mode = app.buttons["密码登录"]
         XCTAssertTrue(mode.waitForExistence(timeout: 15))
         capture(app, "login-sms")
+        app.buttons["登 录"].tap()
+        XCTAssertTrue(app.staticTexts["请输入手机号"].waitForExistence(timeout: 3))
         mode.tap()
         XCTAssertTrue(app.secureTextFields["密码"].exists)
         capture(app, "login-password")
@@ -24,6 +26,11 @@ final class LoginVisualTests: XCTestCase {
         XCTAssertTrue(app.textFields["验证码"].exists)
         XCTAssertFalse(app.secureTextFields["密码"].exists)
         XCTAssertFalse(app.staticTexts["请输入 11 位手机号"].exists)
+        phone.tap()
+        phone.typeText("345678901")
+        if !login.isHittable { app.swipeUp() }
+        login.tap()
+        XCTAssertTrue(app.staticTexts["请输入验证码"].waitForExistence(timeout: 3))
     }
 
     @MainActor private func capture(_ app: XCUIApplication, _ name: String) {

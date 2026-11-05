@@ -82,11 +82,16 @@ import Foundation
         return state
     }
 
-    private func verified(_ binding: MeterBinding, session: QzxySession) async throws -> BleDeviceState {
+    private func verified(_ binding: MeterBinding, session: QzxySession, reconnect: Bool = false,
+                          trace: LatencyTrace? = nil) async throws -> BleDeviceState {
         guard binding.ownerScope == session.ownerScope, !session.loginCode.isEmpty else { throw WaterError.identity }
-        try await transport.connectForTransaction(to: binding.peripheralID)
+        trace?.mark(reconnect ? "reconnecting" : "connecting")
+        if reconnect { try await transport.reconnectForTransaction(to: binding.peripheralID) }
+        else { try await transport.connectForTransaction(to: binding.peripheralID) }
         guard transport.peripheralID == binding.peripheralID else { throw WaterError.identity }
+        trace?.mark("ble_ready")
         let state = try await query()
+        trace?.mark("state_received")
         guard let identity = state.identity else { throw WaterError.unsupportedIdentity }
         // UUID selects the connection; the self-reported MAC routes it to the ledger.
         // Project/device/account bytes are not a cryptographic identity or an ownership proof.
@@ -94,14 +99,39 @@ import Foundation
         return state
     }
 
-    /// Associates iOS discovery with a ledger response; callers perform this automatically.
-    /// Kept as `pair` for existing callers, with no user-facing pairing ceremony.
-    func pair(device: LedgerDevice, session: QzxySession) async throws -> MeterBinding {
-        try begin(); defer { end() }
-        guard !session.loginCode.isEmpty, let id = transport.peripheralID else { throw WaterError.disconnected }
+    /// Proof of the observation used to select the server ledger, scoped to this BLE connection.
+    /// Only the fresh command path can read a protocol challenge for controlling the valve.
+    struct AssociationObservation {
+        let peripheralID: UUID
+        fileprivate let connectionID: UUID
+        let identity: WaterMeterIdentity
+        let state: UInt8
+    }
+
+    private func observeAssociation() async throws -> AssociationObservation {
+        guard let id = transport.peripheralID else { throw WaterError.disconnected }
+        let connection = transport.connectionID
         let state = try await query()
+        guard transport.peripheralID == id, transport.connectionID == connection else { throw WaterError.disconnected }
         guard let identity = state.identity else { throw WaterError.unsupportedIdentity }
-        guard matches(identity, device: device) else { throw WaterError.identity }
+        return AssociationObservation(peripheralID: id, connectionID: connection, identity: identity, state: state.state)
+    }
+
+    func readAssociation() async throws -> AssociationObservation {
+        try begin(); defer { end() }
+        return try await observeAssociation()
+    }
+
+    func pair(device: LedgerDevice, session: QzxySession, observation: AssociationObservation? = nil) async throws -> MeterBinding {
+        try begin(); defer { end() }
+        guard !session.loginCode.isEmpty else { throw WaterError.identity }
+        let proof: AssociationObservation
+        if let observation { proof = observation }
+        else { proof = try await observeAssociation() }
+        let id = proof.peripheralID
+        let identity = proof.identity
+        guard transport.peripheralID == id, transport.connectionID == proof.connectionID,
+              matches(identity, device: device) else { throw WaterError.identity }
         let binding = MeterBinding(peripheralID: id, ownerScope: session.ownerScope, device: device,
                                    observedMAC: identity.macAddress, verifiedAt: Date())
         var next = journal
@@ -120,11 +150,9 @@ import Foundation
 
     func open(binding: MeterBinding, session: QzxySession, trace: LatencyTrace? = nil) async throws {
         try begin(); defer { end() }
-        trace?.mark("connecting")
-        try await transport.reconnectForTransaction(to: binding.peripheralID)
-        trace?.mark("ble_ready")
-        let state = try await verified(binding, session: session)
-        trace?.mark("state_received")
+        // An ambiguous write needs a new connection and a fresh status check before an explicit retry.
+        let reconnect = pending(binding, session: session)?.valve == .unknown
+        let state = try await verified(binding, session: session, reconnect: reconnect, trace: trace)
         if [3, 6].contains(state.state) {
             var tx = pending(binding, session: session) ?? newRecord(binding: binding, state: state)
             try save(tx)
@@ -191,12 +219,10 @@ import Foundation
         var tx = try record(id, session: session)
         guard tx.isPending else { return }
         do {
-            if [WaterPhase.uploadUnknown, .collected, .writeBackPending].contains(tx.phase) {
-                try await transport.reconnectForTransaction(to: tx.binding.peripheralID)
-            }
+            // Relaunch after the 0x22 journal write can occur before the original disconnect.
+            let reconnect = tx.valve == .closed || [WaterPhase.uploadUnknown, .collected, .writeBackPending].contains(tx.phase)
             trace?.mark("close_query")
-            var state = try await verified(tx.binding, session: session)
-            trace?.mark("state_received")
+            var state = try await verified(tx.binding, session: session, reconnect: reconnect, trace: trace)
             if state.state == 1 {
                 // A recorded receipt belongs to an earlier closed session, not new running usage.
                 guard tx.receipt == nil else { throw WaterError.reconciliation }
@@ -225,7 +251,9 @@ import Foundation
                 trace?.mark("settle_state_received")
             }
             guard [0, 3, 6].contains(state.state) else { throw WaterError.invalid("设备关闭状态未确认") }
+            let wasClosed = tx.valve == .closed
             tx.valve = .closed; tx.idleConfirmed = state.state == 0; try save(tx)
+            if !wasClosed { trace?.mark("closed_saved") }
             if state.state == 0, tx.receipt != nil {
                 tx.phase = .completed; tx.lastError = nil; tx.failureReportPending = false; try save(tx)
                 return
