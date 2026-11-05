@@ -73,8 +73,11 @@ import SwiftUI
     }
 
     private var balanceCard: some View {
-        OriginalWalletBalanceCard(title: model.balance?.title ?? "余额", balance: balanceValue,
-                                  source: balanceSource, onEdit: hasRealBalance ? nil : editBalance)
+        let edit: (() -> Void)?
+        if hasRealBalance { edit = nil }
+        else { edit = { editBalance() } }
+        return OriginalWalletBalanceCard(title: model.balance?.title ?? "余额", balance: balanceValue,
+                                         source: balanceSource, onEdit: edit)
     }
 
     private func editBalance() {
