@@ -51,6 +51,7 @@ enum CloudShowerError: LocalizedError {
         var orders: [String: CloudActiveOrder]
         var pending: [PendingSettlement]
         var unknownOpens: Set<String>?
+        var acceptedClosures: [String: String]?
     }
     private let api: QzxyAPI
     private let defaults: UserDefaults
@@ -61,6 +62,7 @@ enum CloudShowerError: LocalizedError {
     private var currentSession: QzxySession?
     private var pending: [PendingSettlement] = []
     private var unknownOpens: Set<String> = []
+    private var acceptedClosures: [String: String] = [:]
     private var busy: Set<String> = []
     private var refreshing = false
     private var monitor: Task<Void, Never>?
@@ -94,6 +96,7 @@ enum CloudShowerError: LocalizedError {
             active = []
             pending = []
             unknownOpens = []
+            acceptedClosures = [:]
             busy = []
             refreshing = false
             accountKey = nil
@@ -118,6 +121,9 @@ enum CloudShowerError: LocalizedError {
         let existing = try await query(snCode, session)
         trace?.mark("prequery_received")
         try check(key)
+        if acceptedCloseStillVisible(snCode, response: existing) {
+            throw CloudShowerError.unconfirmed("关阀已受理，服务器仍在更新设备状态，请稍后刷新")
+        }
         if running(existing) == true {
             guard existing.data?["isOwner"] as? Bool != false else { throw CloudShowerError.inUseByOthers }
             ensure(snCode: snCode, name: name, mac: mac, orderNo: text(existing.data?["orderNo"]) ?? "",
@@ -225,6 +231,7 @@ enum CloudShowerError: LocalizedError {
         trace?.mark("close_accepted")
         // Upstream uses acceptance to leave the use screen. Its optional status read
         // is diagnostic only, so it need not be on this path.
+        acceptedClosures[snCode] = number
         active.removeAll { $0.snCode == snCode }
         orderPolls.removeValue(forKey: snCode)?.cancel()
         if var stopped = order {
@@ -245,6 +252,7 @@ enum CloudShowerError: LocalizedError {
         do {
             let response = try await query(snCode, session)
             try check(key)
+            if acceptedCloseStillVisible(snCode, response: response) { return .unknown }
             if running(response) == true {
                 if response.data?["isOwner"] as? Bool == false { lastMessage = "该设备正在被他人使用"; return .occupied }
                 ensure(snCode: snCode, name: name, mac: mac, orderNo: text(response.data?["orderNo"]) ?? "",
@@ -354,6 +362,19 @@ enum CloudShowerError: LocalizedError {
                                       post: ["xfModel": "0", "snCode": snCode], session: session)
     }
 
+    /// The server can briefly return the same running order after accepting close.
+    /// Suppress revival of that order across refreshes and process restarts.
+    private func acceptedCloseStillVisible(_ snCode: String, response: QzxyResponse) -> Bool {
+        guard let closedOrder = acceptedClosures[snCode] else { return false }
+        let newOrder = text(response.data?["orderNo"]) ?? ""
+        if running(response) == false || (!closedOrder.isEmpty && !newOrder.isEmpty && newOrder != closedOrder) {
+            acceptedClosures.removeValue(forKey: snCode)
+            save()
+            return false
+        }
+        return true
+    }
+
     private func running(_ response: QzxyResponse) -> Bool? {
         if response.errorCode == 307 || (response.success && text(response.data?["orderNo"]) != nil) { return true }
         return response.success ? false : nil
@@ -378,6 +399,7 @@ enum CloudShowerError: LocalizedError {
             active = saved.map { Array($0.orders.values).sorted { $0.startedAt < $1.startedAt } } ?? []
             pending = saved?.pending ?? []
             unknownOpens = saved?.unknownOpens ?? []
+            acceptedClosures = saved?.acceptedClosures ?? [:]
         }
         currentSession = session
         return key
@@ -390,7 +412,8 @@ enum CloudShowerError: LocalizedError {
 
     private func save() {
         guard let accountKey,
-              let data = try? JSONEncoder().encode(Saved(orders: Dictionary(uniqueKeysWithValues: active.map { ($0.snCode, $0) }), pending: pending, unknownOpens: unknownOpens)) else { return }
+              let data = try? JSONEncoder().encode(Saved(orders: Dictionary(uniqueKeysWithValues: active.map { ($0.snCode, $0) }), pending: pending, unknownOpens: unknownOpens,
+                                                            acceptedClosures: acceptedClosures)) else { return }
         defaults.set(data, forKey: accountKey)
     }
 

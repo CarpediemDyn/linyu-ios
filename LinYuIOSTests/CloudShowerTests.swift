@@ -136,6 +136,26 @@ import XCTest
         XCTAssertEqual(restored.latestSettlementYuan, Decimal(string: "0.04"))
     }
 
+    func testAcceptedCloseDoesNotReviveStaleServerOrderAfterRelaunch() async throws {
+        let stale = Step(using, json: ["success": false, "errorCode": 307, "data": ["orderNo": "old", "isOwner": true]])
+        let (api, session) = fixture([stale, Step(close, json: ["success": true]), stale, stale])
+        defer { session.invalidateAndCancel() }
+        let defaults = preferences()
+        let manager = controller(api, defaults)
+        try await manager.open(snCode: "one", name: "A", mac: "AA", session: auth)
+        try await manager.close(snCode: "one", session: auth)
+
+        let restored = controller(api, defaults)
+        let availability = await restored.discover(snCode: "one", name: "A", mac: "AA", session: auth)
+        XCTAssertEqual(availability, .unknown)
+        XCTAssertTrue(restored.active.isEmpty)
+        do {
+            try await restored.open(snCode: "one", name: "A", mac: "AA", session: auth)
+            XCTFail("An accepted close was revived as active use")
+        } catch CloudShowerError.unconfirmed {}
+        XCTAssertTrue(restored.active.isEmpty)
+    }
+
     func testFailedCloseTransportRetainsOriginalStartedAt() async throws {
         let (api, session) = fixture([
             Step(using, json: ["success": false, "errorCode": 307, "data": ["orderNo": "old"]]),

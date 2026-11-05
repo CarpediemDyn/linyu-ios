@@ -347,7 +347,7 @@ import Foundation
         guard tx.isPending else { return }
         let state = try await verified(tx.binding, session: session)
         if state.state == 1 {
-            guard tx.receipt == nil else { throw WaterError.reconciliation }
+            guard tx.valve != .closed, tx.receipt == nil else { throw WaterError.reconciliation }
             tx.valve = .unknown
             do { try save(tx) } catch { }
             do {
