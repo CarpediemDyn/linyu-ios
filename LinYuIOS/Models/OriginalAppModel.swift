@@ -419,7 +419,7 @@ import WidgetKit
             if !userStoppingCloud.contains(sn) {
                 automaticallyEnded.insert(sn + ":" + order.orderNo)
                 if showCloudShower == sn { showCloudShower = nil }
-                automaticFinish = OriginalFinishNotice(id: sn, title: order.deviceName, duration: Int(Date().timeIntervalSince(order.startedAt)))
+                automaticFinish = OriginalFinishNotice(id: sn, title: order.deviceName, duration: Int(Date().timeIntervalSince(order.startedAt)), orderNumber: order.orderNo)
             }
         }
         previousCloud = cloudNow
@@ -441,6 +441,14 @@ import WidgetKit
             OriginalNotifications.shared.remove(id: "inuse.\(id)")
             if preferences.notifyFinished, record.receipt != nil, record.updatedAt > Date().addingTimeInterval(-1800), completedNotified.insert(id).inserted { OriginalNotifications.shared.post(id: "finished.\(id)", title: "用水已结束", text: record.binding.device.name, url: nil) }
         }
+    }
+    /// Expose only the amount already reconciled for this exact finished order.
+    func confirmedFinishAmount(_ event: OriginalFinishNotice) -> Double? {
+        guard let number = event.orderNumber, !number.isEmpty,
+              let order = endedCloud[event.id + ":" + number],
+              let amount = cloud.settlementAmount(for: order) else { return nil }
+        let value = NSDecimalNumber(decimal: amount).doubleValue
+        return value.isFinite ? value : nil
     }
     func handle(_ url: URL) async {
         guard url.scheme == "linyu", auth.session != nil else { return }
@@ -465,4 +473,5 @@ struct OriginalFinishNotice: Identifiable {
     let id: String
     let title: String
     let duration: Int
+    var orderNumber: String? = nil
 }

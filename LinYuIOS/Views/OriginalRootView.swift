@@ -69,7 +69,7 @@ import SwiftUI
         Group {
             switch page {
             case 1: OriginalWalletView(model: model, onModalVisibilityChanged: { inSettings = $0 })
-            case 2: OriginalProfileView(model: model)
+            case 2: OriginalProfileView(model: model, onSettingsVisibilityChanged: { inSettings = $0 })
             default: OriginalHomeView(model: model, onScan: { scanner = true }, onStart: start)
             }
         }
@@ -92,7 +92,7 @@ import SwiftUI
             }
         case .automatic:
             if let event = model.automaticFinish {
-                OriginalAutomaticCloseDialog(event: event) { model.automaticFinish = nil }
+                OriginalAutomaticCloseDialog(event: event, amount: model.confirmedFinishAmount(event)) { model.automaticFinish = nil }
             }
         case .opening: OriginalStartingDeviceDialog()
         case .retry:
