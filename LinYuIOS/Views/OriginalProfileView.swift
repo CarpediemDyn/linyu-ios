@@ -66,8 +66,8 @@ private enum OriginalPanel: String, Identifiable { case settings, room, account,
             }
         case "绑定寝室":
             OriginalGlassCard { VStack(alignment: .leading, spacing: 12) { Text("绑定寝室").font(.headline); Text((model.account?.boundRoom ?? "").isEmpty ? "未绑定寝室，显示全部设备" : model.account?.boundRoom ?? "").foregroundStyle(.secondary); HStack { Button("选择附近") { panel = .room }; Spacer(); if !(model.account?.boundRoom ?? "").isEmpty { Button("取消绑定", role: .destructive) { model.bindRoom("") } } } } }
-        case "通知": OriginalGlassCard { VStack(alignment: .leading) { Toggle("通知", isOn: $model.preferences.notifyEnabled); if model.preferences.notifyEnabled { Toggle("用水中", isOn: $model.preferences.notifyInUse); Toggle("用水结束", isOn: $model.preferences.notifyFinished); Toggle("自动关闭", isOn: $model.preferences.notifyAutoClose); Toggle("异常提醒", isOn: $model.preferences.notifyAlert); Button("允许系统通知") { Task { _ = await OriginalNotifications.shared.requestPermission() } } } } }
-        case "消费趋势": OriginalGlassCard { VStack(alignment: .leading) { Toggle("消费趋势", isOn: $model.preferences.trendEnabled); Picker("图表", selection: $model.preferences.trendType) { Text("折线").tag("LINE"); Text("柱状").tag("BAR") } } }
+        case "通知": OriginalGlassCard { VStack(alignment: .leading) { Toggle("通知", isOn: model.preferences.viewBinding(\.notifyEnabled)); if model.preferences.notifyEnabled { Toggle("用水中", isOn: model.preferences.viewBinding(\.notifyInUse)); Toggle("用水结束", isOn: model.preferences.viewBinding(\.notifyFinished)); Toggle("自动关闭", isOn: model.preferences.viewBinding(\.notifyAutoClose)); Toggle("异常提醒", isOn: model.preferences.viewBinding(\.notifyAlert)); Button("允许系统通知") { Task { _ = await OriginalNotifications.shared.requestPermission() } } } } }
+        case "消费趋势": OriginalGlassCard { VStack(alignment: .leading) { Toggle("消费趋势", isOn: model.preferences.viewBinding(\.trendEnabled)); Picker("图表", selection: model.preferences.viewBinding(\.trendType)) { Text("折线").tag("LINE"); Text("柱状").tag("BAR") } } }
         case "背景装扮": shortcut(card, "photo.on.rectangle.angled", .background)
         case "软件更新": shortcut(card, "arrow.down.circle", .updates)
         case "运行日志": shortcut(card, "doc.text", .logs)
@@ -171,17 +171,17 @@ private enum OriginalPanel: String, Identifiable { case settings, room, account,
     var body: some View {
         NavigationStack {
             Form {
-                Section("外观") { Picker("主题", selection: $model.preferences.theme) { Text("跟随系统").tag("system"); Text("浅色").tag("light"); Text("深色").tag("dark") } }
+                Section("外观") { Picker("主题", selection: model.preferences.viewBinding(\.theme)) { Text("跟随系统").tag("system"); Text("浅色").tag("light"); Text("深色").tag("dark") } }
                 ForEach(model.preferences.settingsOrder.filter { !model.preferences.hiddenSettings.contains($0) }, id: \.self) { title in
                     Section(title) {
                         switch title {
                         case "通知":
-                            Toggle("通知", isOn: $model.preferences.notifyEnabled)
+                            Toggle("通知", isOn: model.preferences.viewBinding(\.notifyEnabled))
                             if model.preferences.notifyEnabled {
-                                Toggle("用水中", isOn: $model.preferences.notifyInUse); Toggle("用水结束", isOn: $model.preferences.notifyFinished); Toggle("自动关闭", isOn: $model.preferences.notifyAutoClose); Toggle("异常提醒", isOn: $model.preferences.notifyAlert)
+                                Toggle("用水中", isOn: model.preferences.viewBinding(\.notifyInUse)); Toggle("用水结束", isOn: model.preferences.viewBinding(\.notifyFinished)); Toggle("自动关闭", isOn: model.preferences.viewBinding(\.notifyAutoClose)); Toggle("异常提醒", isOn: model.preferences.viewBinding(\.notifyAlert))
                                 Button("允许系统通知") { Task { model.message = await OriginalNotifications.shared.requestPermission() ? "通知已允许" : "请在系统设置中开启通知" } }
                             }
-                        case "消费趋势": Toggle("显示消费趋势", isOn: $model.preferences.trendEnabled); Picker("图表", selection: $model.preferences.trendType) { Text("折线").tag("LINE"); Text("柱状").tag("BAR") }
+                        case "消费趋势": Toggle("显示消费趋势", isOn: model.preferences.viewBinding(\.trendEnabled)); Picker("图表", selection: model.preferences.viewBinding(\.trendType)) { Text("折线").tag("LINE"); Text("柱状").tag("BAR") }
                         case "背景装扮": Button("背景装扮") { panel = .background }
                         case "绑定寝室": Text((model.account?.boundRoom ?? "").isEmpty ? "未绑定寝室" : model.account?.boundRoom ?? ""); Button("选择附近") { panel = .room }; if !(model.account?.boundRoom ?? "").isEmpty { Button("取消绑定", role: .destructive) { model.bindRoom("") } }
                         case "账号信息": Text(model.account?.profile.name ?? "趣智校园用户"); if let school = model.account?.profile.schoolName { LabeledContent("学校", value: school) }; if let student = model.account?.profile.studentNumber { LabeledContent("学号", value: student) }; Button("账号管理") { panel = .account }
@@ -245,12 +245,12 @@ private enum OriginalPanel: String, Identifiable { case settings, room, account,
     var body: some View {
         NavigationStack {
             Form {
-                Picker("背景", selection: $model.preferences.backgroundScope) { Text("主页").tag("home"); Text("使用页").tag("shower") }.pickerStyle(.segmented)
+                Picker("背景", selection: model.preferences.viewBinding(\.backgroundScope)) { Text("主页").tag("home"); Text("使用页").tag("shower") }.pickerStyle(.segmented)
                 OriginalBackground(preferences: model.preferences, shower: model.preferences.backgroundScope == "shower").frame(height: 180).clipShape(RoundedRectangle(cornerRadius: 18))
                 PhotosPicker(selection: $photo, matching: .images) { Label("从相册选择背景", systemImage: "photo") }
-                LabeledContent("透明度") { Slider(value: $model.preferences.opacity, in: 0...1) }
-                LabeledContent("模糊") { Slider(value: $model.preferences.blur, in: 0...30) }
-                LabeledContent("亮度") { Slider(value: $model.preferences.brightness, in: 0.4...1.5) }
+                LabeledContent("透明度") { Slider(value: model.preferences.viewBinding(\.opacity), in: 0...1) }
+                LabeledContent("模糊") { Slider(value: model.preferences.viewBinding(\.blur), in: 0...30) }
+                LabeledContent("亮度") { Slider(value: model.preferences.viewBinding(\.brightness), in: 0.4...1.5) }
                 Button("恢复默认") { model.preferences.resetBackground(scope: model.preferences.backgroundScope) }
             }.navigationTitle("背景装扮").toolbar { Button("完成") { dismiss() } }
             .onChange(of: photo) { item in

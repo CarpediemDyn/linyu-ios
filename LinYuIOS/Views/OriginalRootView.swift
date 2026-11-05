@@ -150,6 +150,12 @@ import Charts
     }
 }
 
+@MainActor extension OriginalPreferences {
+    func viewBinding<Value>(_ keyPath: ReferenceWritableKeyPath<OriginalPreferences, Value>) -> Binding<Value> {
+        Binding(get: { self[keyPath: keyPath] }, set: { self[keyPath: keyPath] = $0 })
+    }
+}
+
 struct OriginalGlassCard<Content: View>: View {
     let content: Content
     init(@ViewBuilder content: () -> Content) { self.content = content() }
@@ -314,7 +320,7 @@ struct OriginalGlassCard<Content: View>: View {
                         OriginalGlassCard {
                             VStack(alignment: .leading, spacing: 12) {
                                 Text("消费趋势").font(.headline)
-                                Picker("范围", selection: $model.preferences.trendRange) { Text("近7天").tag("LAST_7_DAYS"); Text("本月").tag("THIS_MONTH") }.pickerStyle(.segmented)
+                                Picker("范围", selection: model.preferences.viewBinding(\.trendRange)) { Text("近7天").tag("LAST_7_DAYS"); Text("本月").tag("THIS_MONTH") }.pickerStyle(.segmented)
                                 if trend.isEmpty { Text("暂无消费数据").foregroundStyle(.secondary) }
                                 else {
                                     Chart(trend) { bill in
