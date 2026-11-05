@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import SwiftUI
 import UIKit
 import XCTest
@@ -396,6 +397,17 @@ import XCTest
         let auth = AuthManager(api: network, storage: storage.storage)
         let cloud = CloudShowerController(api: network, mqttEnabled: false)
         let model = OriginalAppModel(authentication: auth, network: network, cloudController: cloud)
+        let refreshCompleted = expectation(description: "Initial account refresh finished")
+        var beganRefresh = false
+        var finishedRefresh = false
+        let refreshObservation = model.$refreshing.sink { refreshing in
+            if refreshing { beganRefresh = true }
+            else if beganRefresh && !finishedRefresh {
+                finishedRefresh = true
+                refreshCompleted.fulfill()
+            }
+        }
+        defer { refreshObservation.cancel() }
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let previous = scene.windows.first(where: \.isKeyWindow)
         let window = UIWindow(windowScene: scene)
@@ -406,7 +418,7 @@ import XCTest
             auth.logout()
             window.isHidden = true
             previous?.makeKey()
-            fixture.invalidateAndCancel()
+            if finishedRefresh { fixture.invalidateAndCancel() }
             UserDefaults.standard.removeObject(forKey: cacheKey)
             UserDefaults.standard.removeObject(forKey: accountKey)
         }
@@ -415,6 +427,8 @@ import XCTest
         let trace = LatencyTrace("mock_login_home", report: { print($0) })
         trace.onStage = { stage in
             if stage == "home_visible" {
+                XCTAssertFalse(finishedRefresh)
+                XCTAssertEqual(model.bills.count, 0)
                 print("LATENCY mock_login_home_cache bills=\(model.bills.count)")
                 visible.fulfill()
             }
@@ -423,6 +437,8 @@ import XCTest
         await auth.login(phone: "13800138000", secret: "123456", usePassword: false, trace: trace)
         await fulfillment(of: [visible], timeout: 5)
         XCTAssertEqual(auth.session?.ownerScope, owner)
+        await fulfillment(of: [refreshCompleted], timeout: 10)
+        XCTAssertEqual(model.balance?.campusBalance, 10)
     }
 
     func testSMSLoginKeepsLegacyFieldsAndDecodesSharedSession() async throws {

@@ -182,6 +182,7 @@ import WidgetKit
         var successfulMonths = Set<String>()
         var requestedMonths = Set<String>()
         for offset in 0..<3 {
+            guard generation == token, !Task.isCancelled else { return }
             let date = Calendar.current.date(byAdding: .month, value: -offset, to: Date())!
             let formatter = DateFormatter(); formatter.dateFormat = "yyyy-MM"
             let month = formatter.string(from: date)
