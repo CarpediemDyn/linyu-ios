@@ -1,4 +1,6 @@
 import Foundation
+import SwiftUI
+import UIKit
 import XCTest
 @testable import LinYuIOS
 
@@ -289,6 +291,62 @@ import XCTest
             XCTFail("Accepted empty failure timestamp")
         } catch WaterError.invalid { }
         XCTAssertEqual(count, 0)
+    }
+
+    func testMockLoginThroughRealHomeWithCachedBills() async throws {
+        let project = "9"
+        let account = UUID().uuidString
+        let owner = QzxySession(telephone: "13800138000", loginCode: "fixture", userId: "7",
+                                accountId: account, projectId: project).ownerScope
+        let cacheKey = "replica.\(owner).balance"
+        let accountKey = "replica.\(owner).account"
+        let cache = CampusBalanceSnapshot(ownerScope: owner, campusBalance: 10, bills: (0..<1_500).map { index in
+            CampusBill(orderId: String(index), consumeDate: "2026-10-12 12:00:00", consumeMoney: "0.41", description: "测试账单")
+        })
+        UserDefaults.standard.set(try JSONEncoder().encode(cache), forKey: cacheKey)
+
+        let fixture = fixtureSession { request in
+            if request.url?.path == "/user/registerAndLogin" {
+                Thread.sleep(forTimeInterval: 0.15)
+                return try self.response([
+                    "success": true, "data": ["loginCode": "fixture", "userId": 7,
+                                               "userAccount": ["accountId": account, "projectId": project]]
+                ])
+            }
+            Thread.sleep(forTimeInterval: 0.30)
+            return try self.response(["success": true, "data": NSNull()])
+        }
+        let network = QzxyAPI(session: fixture)
+        let auth = AuthManager(api: network, storageKey: "mock-home-" + account)
+        let cloud = CloudShowerController(api: network, mqttEnabled: false)
+        let model = OriginalAppModel(authentication: auth, network: network, cloudController: cloud)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previous = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = UIHostingController(rootView: OriginalRootView(model: model))
+        window.makeKeyAndVisible()
+        defer {
+            model.setForeground(false)
+            auth.logout()
+            window.isHidden = true
+            previous?.makeKey()
+            fixture.invalidateAndCancel()
+            UserDefaults.standard.removeObject(forKey: cacheKey)
+            UserDefaults.standard.removeObject(forKey: accountKey)
+        }
+        try await Task.sleep(nanoseconds: 200_000_000)
+        let visible = expectation(description: "Production home appeared")
+        let trace = LatencyTrace("mock_login_home", report: { print($0) })
+        trace.onStage = { stage in
+            if stage == "home_visible" {
+                print("LATENCY mock_login_home_cache bills=\(model.bills.count)")
+                visible.fulfill()
+            }
+        }
+        trace.mark("tap")
+        await auth.login(phone: "13800138000", secret: "123456", usePassword: false, trace: trace)
+        await fulfillment(of: [visible], timeout: 5)
+        XCTAssertEqual(auth.session?.ownerScope, owner)
     }
 
     func testSMSLoginKeepsLegacyFieldsAndDecodesSharedSession() async throws {

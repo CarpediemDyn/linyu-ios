@@ -9,7 +9,8 @@ import Combine
     @Published var loading = false
     @Published var transactionInProgress = false
 
-    private let api = QzxyAPI()
+    private let api: QzxyAPI
+    private let storageKey: String
     private var loginTrace: LatencyTrace?
 
     func homeAppeared() {
@@ -17,8 +18,10 @@ import Combine
         loginTrace = nil
     }
 
-    init() {
-        if let data = KeychainStore.get("user-session") {
+    init(api: QzxyAPI? = nil, storageKey: String = "user-session") {
+        self.api = api ?? QzxyAPI()
+        self.storageKey = storageKey
+        if let data = KeychainStore.get(storageKey) {
             session = try? JSONDecoder().decode(QzxySession.self, from: data)
         }
     }
@@ -36,7 +39,7 @@ import Combine
             let result: QzxySession = usePassword
                 ? try await api.loginWithPassword(phone: phone, password: secret, trace: trace)
                 : try await api.loginWithSMS(phone: phone, code: secret, trace: trace)
-            guard let data = try? JSONEncoder().encode(result), KeychainStore.put(data, for: "user-session") else {
+            guard let data = try? JSONEncoder().encode(result), KeychainStore.put(data, for: storageKey) else {
                 throw QzxyError.server("登录成功，但会话未能安全保存")
             }
             trace?.mark("session_saved")
@@ -67,7 +70,7 @@ import Combine
 
     func logout() {
         guard !transactionInProgress else { activity = "用水操作处理中，请等待当前操作结束"; return }
-        KeychainStore.delete("user-session")
+        KeychainStore.delete(storageKey)
         session = nil
         activity = "已退出登录"
         walletText = ""
@@ -76,7 +79,7 @@ import Combine
 
     func replaceSession(_ value: QzxySession) throws {
         let data = try JSONEncoder().encode(value)
-        guard KeychainStore.put(data, for: "user-session") else { throw WaterError.storage }
+        guard KeychainStore.put(data, for: storageKey) else { throw WaterError.storage }
         session = value
     }
 
