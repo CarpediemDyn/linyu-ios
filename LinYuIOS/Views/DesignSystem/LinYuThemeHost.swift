@@ -15,89 +15,126 @@ extension EnvironmentValues {
     }
 }
 
+/// Keeps the live page mounted once. Display-link ticks belong to the UIKit mask only.
 @MainActor struct LinYuThemeHost<Content: View>: View {
     @ObservedObject var preferences: OriginalPreferences
     @Environment(\.colorScheme) private var systemScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var reveal = LinYuThemeReveal()
-    @State private var displayDark = false
-    @State private var oldDark = false
-    @State private var revealStart: Date?
+    @State private var displayDark: Bool
+    @State private var transition: Transition?
     private let content: Content
+
+    private struct Transition {
+        let id = UUID()
+        let oldDark: Bool
+        let targetDark: Bool
+        let origin: CGPoint
+    }
+
     init(preferences: OriginalPreferences, @ViewBuilder content: () -> Content) {
-        self.preferences = preferences; self.content = content()
+        self.preferences = preferences
+        self.content = content()
         _displayDark = State(initialValue: preferences.theme == "dark")
     }
+
     private var requestedDark: Bool {
         preferences.theme == "dark" || (preferences.theme == "system" && systemScheme == .dark)
     }
+
     var body: some View {
         GeometryReader { geometry in
-            TimelineView(.animation(paused: revealStart == nil)) { timeline in
-                let progress = revealStart.map { Self.easedProgress(timeline.date.timeIntervalSince($0) / 0.65) } ?? 1
-                let dark = revealStart != nil && progress < 0.2 ? oldDark : displayDark
-                let palette = LinYuPalette(isDark: dark, customAccent: preferences.homeThemeRGB)
-                ZStack {
-                content
-                    .environment(\.linYuColors, palette)
-                    .environment(\.linYuWindow, LinYuWindowLayout(size: geometry.size))
-                    .environment(\.linYuThemeReveal, reveal)
-                    .tint(palette.accent)
-                if revealStart != nil {
-                    LinYuRevealOverlay(progress: progress, origin: reveal.origin,
-                                       size: geometry.size, color: LinYuPalette(isDark: oldDark).background)
-                        .ignoresSafeArea().allowsHitTesting(false).accessibilityHidden(true)
+            let palette = LinYuPalette(isDark: displayDark, customAccent: preferences.homeThemeRGB)
+            content
+                .environment(\.linYuColors, palette)
+                .environment(\.linYuWindow, LinYuWindowLayout(size: geometry.size))
+                .environment(\.linYuThemeReveal, reveal)
+                .environment(\.colorScheme, displayDark ? .dark : .light)
+                .tint(palette.accent)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background { palette.background.ignoresSafeArea(.container) }
+                .overlay {
+                    if let transition {
+                        GeometryReader { overlay in
+                            let offset = overlay.frame(in: .named("linyu.theme")).origin
+                            let origin = transition.origin == .zero ? CGPoint.zero
+                                : CGPoint(x: transition.origin.x - offset.x, y: transition.origin.y - offset.y)
+                            LinYuRevealDrawing(
+                                origin: origin,
+                                oldColor: UIColor(LinYuPalette(isDark: transition.oldDark).background),
+                                previewApplied: displayDark == transition.targetDark,
+                                onPreview: { applyPreview(id: transition.id) },
+                                onCompletion: { finish(id: transition.id) }
+                            )
+                        }
+                        .id(transition.id)
+                        .ignoresSafeArea(.container)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                        .transition(.identity)
+                    }
                 }
-                }.frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .preferredColorScheme(preferences.theme == "system" ? nil : (dark ? .dark : .light))
-            }
+                .preferredColorScheme(preferences.theme == "system" ? nil : (displayDark ? .dark : .light))
+                .onChange(of: geometry.size) { _ in finishCurrent() }
         }
         .coordinateSpace(name: "linyu.theme")
-        .onAppear { displayDark = requestedDark }
+        .onAppear { applyImmediately() }
         .onChange(of: preferences.theme) { _ in beginReveal() }
-        .onChange(of: systemScheme) { _ in if preferences.theme == "system" { displayDark = requestedDark } }
-        .task(id: revealStart) {
-            guard revealStart != nil else { return }
-            do { try await Task.sleep(nanoseconds: 650_000_000) } catch { return }
-            revealStart = nil; reveal.isAnimating = false
+        .onChange(of: systemScheme) { _ in
+            if preferences.theme == "system" { applyImmediately() }
         }
+        .onChange(of: reduceMotion) { reduced in if reduced { applyImmediately() } }
+        .onChange(of: scenePhase) { phase in if phase != .active { applyImmediately() } }
+        .onDisappear { applyImmediately() }
     }
-    private func beginReveal() {
-        guard !reveal.isAnimating, displayDark != requestedDark else { return }
-        oldDark = displayDark; displayDark = requestedDark
-        reveal.isAnimating = true; revealStart = .now
-    }
-    private static func easedProgress(_ time: Double) -> Double {
-        let target = min(1, max(0, time))
-        var lower = 0.0, upper = 1.0
-        for _ in 0..<16 {
-            let t = (lower + upper) / 2, u = 1 - t
-            let x = 1.2 * u * u * t + 0.6 * u * t * t + t * t * t
-            if x < target { lower = t } else { upper = t }
-        }
-        let t = (lower + upper) / 2
-        return t * t * (3 - 2 * t)
-    }
-}
 
-private struct LinYuRevealOverlay: View, Animatable {
-    var progress: Double
-    let origin: CGPoint
-    let size: CGSize
-    let color: Color
-    var animatableData: Double {
-        get { progress }
-        set { progress = newValue }
+    private func withoutAnimation(_ action: () -> Void) {
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction, action)
     }
-    var body: some View {
-        let center = origin == .zero ? CGPoint(x: size.width - 36, y: 48) : origin
-        let radius = max(max(hypot(center.x, center.y), hypot(size.width - center.x, center.y)),
-                         max(hypot(center.x, size.height - center.y), hypot(size.width - center.x, size.height - center.y))) * 1.15
-        let currentRadius = radius * CGFloat(min(1, max(0, (progress - 0.2) / 0.8)))
-        Path { path in
-            path.addRect(CGRect(origin: .zero, size: size))
-            path.addEllipse(in: CGRect(x: center.x - currentRadius, y: center.y - currentRadius,
-                                      width: currentRadius * 2, height: currentRadius * 2))
-        }.fill(color, style: FillStyle(eoFill: true)).opacity(min(1, progress / 0.2))
+
+    private func applyImmediately() {
+        withoutAnimation {
+            displayDark = requestedDark
+            transition = nil
+            reveal.isAnimating = false
+            reveal.origin = .zero
+        }
+    }
+
+    private func beginReveal() {
+        // A programmatic preference change during a reveal is reconciled at completion.
+        guard transition == nil else { return }
+        guard !reduceMotion, scenePhase == .active, displayDark != requestedDark else {
+            applyImmediately()
+            return
+        }
+        withoutAnimation {
+            transition = Transition(oldDark: displayDark, targetDark: requestedDark, origin: reveal.origin)
+            reveal.origin = .zero
+            reveal.isAnimating = true
+        }
+    }
+
+    private func applyPreview(id: UUID) {
+        guard let transition, transition.id == id else { return }
+        withoutAnimation { displayDark = transition.targetDark }
+    }
+
+    private func finish(id: UUID) {
+        guard let transition, transition.id == id else { return }
+        withoutAnimation {
+            displayDark = transition.targetDark
+            self.transition = nil
+            reveal.isAnimating = false
+        }
+        if displayDark != requestedDark { beginReveal() }
+    }
+
+    private func finishCurrent() {
+        if let transition { finish(id: transition.id) }
     }
 }
 
@@ -114,10 +151,15 @@ private struct LinYuThemeFrameKey: PreferenceKey {
         Button {
             guard !reveal.isAnimating else { return }
             reveal.origin = CGPoint(x: frame.midX, y: frame.midY)
+            // Lock synchronously so a second tap cannot queue another preference change.
+            reveal.isAnimating = true
             preferences.theme = colors.isDark ? "light" : "dark"
         } label: {
             Text(colors.isDark ? "🌙" : "☀️").font(LinYuType.font(20)).frame(width: 40, height: 40)
-        }.buttonStyle(.plain).accessibilityLabel("切换深浅主题")
+        }.buttonStyle(.plain).disabled(reveal.isAnimating)
+            .accessibilityLabel("切换深浅主题")
+            .accessibilityValue(colors.isDark ? "深色" : "浅色")
+            .accessibilityIdentifier("linyu.theme.toggle")
             .background(GeometryReader { proxy in Color.clear.preference(key: LinYuThemeFrameKey.self, value: proxy.frame(in: .named("linyu.theme"))) })
             .onPreferenceChange(LinYuThemeFrameKey.self) { frame = $0 }
     }

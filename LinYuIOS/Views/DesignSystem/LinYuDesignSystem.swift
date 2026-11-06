@@ -257,7 +257,6 @@ struct LinYuPillNavigation: View {
             .background(Color(linYuHex: colors.isDark ? 0x1A202C : 0xFFFFFF, alpha: Double(colors.isDark ? 184 : 216) / 255), in: RoundedRectangle(cornerRadius: 28))
             .overlay(RoundedRectangle(cornerRadius: 28).stroke(Color(linYuHex: colors.isDark ? 0xFFFFFF : 0x000000, alpha: Double(colors.isDark ? 40 : 24) / 255), lineWidth: 1))
             .shadow(color: .black.opacity(0.22), radius: 10, y: 7)
-            .animation(.easeInOut(duration: 0.2), value: colors.isDark)
     }
 }
 
@@ -276,6 +275,6 @@ struct LinYuPillNavigation: View {
                         .opacity(preferences.backgroundOpacity(shower: shower)).blur(radius: preferences.backgroundBlur(shower: shower))
                 }
             }.frame(width: geometry.size.width, height: geometry.size.height).clipped()
-        }.ignoresSafeArea().allowsHitTesting(false).accessibilityHidden(true)
+        }.ignoresSafeArea(.container).allowsHitTesting(false).accessibilityHidden(true)
     }
 }
