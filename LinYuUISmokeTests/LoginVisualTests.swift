@@ -3,7 +3,7 @@ import CoreFoundation
 
 /// Exercises the real login UI without using any account or calling the API.
 final class LoginVisualTests: XCTestCase {
-    @MainActor func testLoginModesAndInvalidPhone() {
+    @MainActor func testLoginModesAndInvalidPhone() async {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
         app.launch()
@@ -21,8 +21,9 @@ final class LoginVisualTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["密码"].exists)
         phone.tap()
         phone.typeText("12")
+        XCTAssertEqual(phone.value as? String, "12")
         let login = app.buttons["登 录"]
-        if !login.isHittable { app.swipeUp() }
+        guard reveal(login, in: app), await stable(login, in: app) else { return }
         login.tap()
         XCTAssertTrue(app.staticTexts["请输入 11 位手机号"].waitForExistence(timeout: 5))
         capture(app, "login-invalid-phone")
@@ -32,7 +33,8 @@ final class LoginVisualTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["请输入 11 位手机号"].exists)
         phone.tap()
         phone.typeText("345678901")
-        if !login.isHittable { app.swipeUp() }
+        XCTAssertEqual(phone.value as? String, "12345678901")
+        guard reveal(login, in: app), await stable(login, in: app) else { return }
         login.tap()
         XCTAssertTrue(app.staticTexts["请输入验证码"].waitForExistence(timeout: 3))
     }
@@ -170,6 +172,27 @@ final class LoginVisualTests: XCTestCase {
         hierarchy.lifetime = .keepAlways
         add(hierarchy)
         XCTFail("The login control must remain reachable by normal scrolling: \(control)")
+        return false
+    }
+
+    @MainActor private func stable(_ control: XCUIElement, in app: XCUIApplication) async -> Bool {
+        // iPad centers the form; keyboard/focus layout can still move it after typing.
+        // Wait on actual geometry instead of tapping a cached pre-keyboard frame.
+        let start = ProcessInfo.processInfo.systemUptime
+        var previous = CGRect.null
+        var lastChange = start
+        while ProcessInfo.processInfo.systemUptime - start < 5 {
+            let now = ProcessInfo.processInfo.systemUptime
+            if control.exists && control.isEnabled && control.isHittable {
+                let frame = control.frame
+                if frame == previous {
+                    if now - lastChange >= 0.25 { return true }
+                } else { previous = frame; lastChange = now }
+            } else { previous = .null; lastChange = now }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        capture(app, "login-button-layout-not-stable")
+        XCTFail("The enabled login button must settle inside the visible form before tapping")
         return false
     }
 

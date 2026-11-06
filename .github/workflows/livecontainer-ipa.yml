@@ -1,8 +1,14 @@
 name: Build LiveContainer IPA
-run-name: ${{ inputs.inspect_run != '' && 'Inspect XCTest diagnostics (no build)' || inputs.preflight_only && 'Release preflight (no IPA)' || inputs.tests_only && 'iOS regression tests (no IPA)' || 'Build LiveContainer IPA' }}
+run-name: ${{ inputs.inspect_run != '' && 'Inspect XCTest diagnostics (no build)' || inputs.preflight_only && 'Release preflight (no IPA)' || inputs.tests_only && inputs.test_scope != 'all' && 'Focused iOS tests (no IPA)' || inputs.tests_only && 'iOS regression tests (no IPA)' || 'Build LiveContainer IPA' }}
 on:
   workflow_dispatch:
     inputs:
+      test_scope:
+        description: Debug scope for test-only runs; IPA builds always execute the full suite
+        type: choice
+        required: true
+        default: all
+        options: [all, login-input]
       inspect_run:
         description: Optional completed run ID; inspect its XCTest only, without compiling or packaging
         type: string
@@ -117,13 +123,20 @@ jobs:
           xcrun simctl bootstatus "$SIMULATOR_ID" -b
           echo "IOS_SIMULATOR_UDID=$SIMULATOR_ID" >> "$GITHUB_ENV"
       - name: Compile and run iOS tests
+        env:
+          LINYU_TESTS_ONLY: ${{ inputs.tests_only }}
+          LINYU_TEST_SCOPE: ${{ inputs.test_scope }}
         run: |
           set -o pipefail
           mkdir -p work
+          TEST_SELECTION=()
+          if [ "$LINYU_TESTS_ONLY" = true ] && [ "$LINYU_TEST_SCOPE" = login-input ]; then
+            TEST_SELECTION=(-only-testing:LinYuUISmokeTests/LoginVisualTests/testLoginModesAndInvalidPhone -test-iterations 3)
+          fi
           xcodebuild -project LinYuLiveContainer.xcodeproj -scheme LinYuIOS \
             -configuration Debug -sdk iphonesimulator -destination "id=$IOS_SIMULATOR_UDID" \
             -derivedDataPath work/SimulatorBuild -resultBundlePath work/ContainerTests.xcresult \
-            CODE_SIGNING_ALLOWED=NO test 2>&1 | tee work/xcodebuild-test.log
+            "${TEST_SELECTION[@]}" CODE_SIGNING_ALLOWED=NO test 2>&1 | tee work/xcodebuild-test.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
