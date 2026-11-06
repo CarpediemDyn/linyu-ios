@@ -15,57 +15,111 @@ extension EnvironmentValues {
     }
 }
 
+/// Android CircularRevealThemeHost parity:
+/// keep the content mounted once; only the overlay advances every animation frame.
 @MainActor struct LinYuThemeHost<Content: View>: View {
     @ObservedObject var preferences: OriginalPreferences
     @Environment(\.colorScheme) private var systemScheme
     @StateObject private var reveal = LinYuThemeReveal()
     @State private var displayDark = false
     @State private var oldDark = false
+    @State private var targetDark = false
     @State private var revealStart: Date?
     private let content: Content
+
     init(preferences: OriginalPreferences, @ViewBuilder content: () -> Content) {
-        self.preferences = preferences; self.content = content()
+        self.preferences = preferences
+        self.content = content()
         _displayDark = State(initialValue: preferences.theme == "dark")
     }
+
     private var requestedDark: Bool {
         preferences.theme == "dark" || (preferences.theme == "system" && systemScheme == .dark)
     }
+
     var body: some View {
         GeometryReader { geometry in
-            TimelineView(.animation(paused: revealStart == nil)) { timeline in
-                let progress = revealStart.map { Self.easedProgress(timeline.date.timeIntervalSince($0) / 0.65) } ?? 1
-                let dark = revealStart != nil && progress < 0.2 ? oldDark : displayDark
-                let palette = LinYuPalette(isDark: dark, customAccent: preferences.homeThemeRGB)
-                ZStack {
+            let palette = LinYuPalette(isDark: displayDark, customAccent: preferences.homeThemeRGB)
+            ZStack {
+                // Cover the entire hosting view, including the home-indicator area.
+                // A preferredColorScheme change must not expose the UIKit default white.
+                palette.background.ignoresSafeArea()
+
                 content
                     .environment(\.linYuColors, palette)
                     .environment(\.linYuWindow, LinYuWindowLayout(size: geometry.size))
                     .environment(\.linYuThemeReveal, reveal)
                     .tint(palette.accent)
-                if revealStart != nil {
-                    LinYuRevealOverlay(progress: progress, origin: reveal.origin,
-                                       size: geometry.size, color: LinYuPalette(isDark: oldDark).background)
-                        .ignoresSafeArea().allowsHitTesting(false).accessibilityHidden(true)
+
+                if let revealStart {
+                    // Unlike the previous implementation, TimelineView does not wrap
+                    // the live page hierarchy, navigation, Bluetooth views or dialogs.
+                    LinYuRevealAnimation(start: revealStart,
+                                         origin: reveal.origin,
+                                         oldBackground: LinYuPalette(isDark: oldDark).background)
+                        .ignoresSafeArea()
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
                 }
-                }.frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .preferredColorScheme(preferences.theme == "system" ? nil : (dark ? .dark : .light))
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(palette.background.ignoresSafeArea())
+            .preferredColorScheme(preferences.theme == "system" ? nil : (displayDark ? .dark : .light))
         }
+        .background(LinYuPalette(isDark: displayDark).background.ignoresSafeArea())
         .coordinateSpace(name: "linyu.theme")
         .onAppear { displayDark = requestedDark }
         .onChange(of: preferences.theme) { _ in beginReveal() }
-        .onChange(of: systemScheme) { _ in if preferences.theme == "system" { displayDark = requestedDark } }
+        .onChange(of: systemScheme) { _ in
+            if preferences.theme == "system", !reveal.isAnimating { displayDark = requestedDark }
+        }
         .task(id: revealStart) {
-            guard revealStart != nil else { return }
-            do { try await Task.sleep(nanoseconds: 650_000_000) } catch { return }
-            revealStart = nil; reveal.isAnimating = false
+            guard let started = revealStart else { return }
+            do {
+                // Android switches the content at 20% of the eased circular reveal.
+                // This corresponds to about 152ms for its 650ms cubic-bezier curve.
+                try await Task.sleep(nanoseconds: 152_000_000)
+                guard revealStart == started else { return }
+                displayDark = targetDark
+                try await Task.sleep(nanoseconds: 498_000_000)
+                guard revealStart == started else { return }
+                revealStart = nil
+                reveal.isAnimating = false
+            } catch {
+                // A removed view must not complete an obsolete theme transition.
+                return
+            }
         }
     }
+
     private func beginReveal() {
         guard !reveal.isAnimating, displayDark != requestedDark else { return }
-        oldDark = displayDark; displayDark = requestedDark
-        reveal.isAnimating = true; revealStart = .now
+        oldDark = displayDark
+        targetDark = requestedDark
+        reveal.isAnimating = true
+        revealStart = .now
     }
+}
+
+/// Runs only the drawing overlay at display cadence, never the application content.
+private struct LinYuRevealAnimation: View {
+    let start: Date
+    let origin: CGPoint
+    let oldBackground: Color
+
+    var body: some View {
+        TimelineView(.animation) { context in
+            GeometryReader { proxy in
+                LinYuRevealOverlay(
+                    progress: Self.easedProgress(context.date.timeIntervalSince(start) / 0.65),
+                    origin: origin,
+                    size: proxy.size,
+                    color: oldBackground
+                )
+            }
+        }
+    }
+
     private static func easedProgress(_ time: Double) -> Double {
         let target = min(1, max(0, time))
         var lower = 0.0, upper = 1.0
