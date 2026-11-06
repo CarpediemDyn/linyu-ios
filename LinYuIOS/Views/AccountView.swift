@@ -125,6 +125,11 @@ import SwiftUI
         return true
     }
     private func login() {
+#if targetEnvironment(simulator)
+        if ProcessInfo.processInfo.environment["LINYU_LOGIN_DIAGNOSTICS"] == "1" {
+            OriginalLogs.shared.add("UITEST_LOGIN_ACTION mode=\(usePassword ? "password" : "sms") phone_length=\(phone.count) ready=\(canSubmitLogin)")
+        }
+#endif
         let trace = OriginalLogs.shared.trace("login")
         trace.mark("tap")
         guard canSubmitLogin else { trace.finish("busy"); return }
@@ -196,6 +201,13 @@ private struct LoginSubmitButtonStyle: ButtonStyle {
                     .shadow(color: .black.opacity(isEnabled && !pressed ? 0.22 : 0), radius: 4, y: 3)
             }
             .contentShape(shape)
+            .onChange(of: configuration.isPressed) { pressed in
+#if targetEnvironment(simulator)
+                if ProcessInfo.processInfo.environment["LINYU_LOGIN_DIAGNOSTICS"] == "1" {
+                    Task { @MainActor in OriginalLogs.shared.add("UITEST_LOGIN_PRESS pressed=\(pressed)") }
+                }
+#endif
+            }
     }
 }
 

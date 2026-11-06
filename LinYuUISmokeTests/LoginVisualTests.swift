@@ -4,9 +4,7 @@ import CoreFoundation
 /// Exercises the real login UI without using any account or calling the API.
 final class LoginVisualTests: XCTestCase {
     @MainActor func testLoginModesAndInvalidPhone() async {
-        XCUIDevice.shared.orientation = .portrait
-        let app = XCUIApplication()
-        app.launch()
+        let app = launchFixture("fast", diagnostics: true)
         let mode = app.buttons["密码登录"]
         XCTAssertTrue(mode.waitForExistence(timeout: 15))
         capture(app, "login-sms")
@@ -132,10 +130,11 @@ final class LoginVisualTests: XCTestCase {
         releaseFixtureResponse(in: app)
     }
 
-    @MainActor private func launchFixture(_ scenario: String) -> XCUIApplication {
+    @MainActor private func launchFixture(_ scenario: String, diagnostics: Bool = false) -> XCUIApplication {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
         app.launchEnvironment["LINYU_LOGIN_FIXTURE"] = scenario
+        if diagnostics { app.launchEnvironment["LINYU_LOGIN_DIAGNOSTICS"] = "1" }
         if scenario == "slow" { app.launchEnvironment["LINYU_LOGIN_GATE"] = UUID().uuidString }
         app.launch()
         XCTAssertTrue(app.textFields["手机号"].waitForExistence(timeout: 15))
