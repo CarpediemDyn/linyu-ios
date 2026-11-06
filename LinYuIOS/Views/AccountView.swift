@@ -72,9 +72,12 @@ import SwiftUI
         VStack(spacing: 0) {
             Text("欢迎回来").font(LinYuType.font(22, weight: .bold)).foregroundStyle(Color(linYuHex: 0x1A1A1A)).frame(minHeight: 32)
             Text("请使用校园账号登录").font(LinYuType.font(13)).foregroundStyle(.gray).frame(minHeight: 24).padding(.top, 4).padding(.bottom, compact ? 8 : 20)
-            Button(usePassword ? "验证码登录" : "密码登录") {
+            Button {
                 usePassword.toggle(); error = nil; password = ""; smsCode = ""
-            }.font(LinYuType.font(13)).foregroundStyle(blue).frame(minHeight: 44).padding(.bottom, compact ? 4 : 16).disabled(loggingIn)
+            } label: {
+                Text(usePassword ? "验证码登录" : "密码登录")
+                    .font(LinYuType.font(13)).frame(minHeight: 44).contentShape(Rectangle())
+            }.foregroundStyle(blue).padding(.bottom, compact ? 4 : 16).disabled(loggingIn)
             Text(usePassword ? "未设置密码？请使用手机号验证码登录" : "未注册的手机号将自动创建账号")
                 .font(LinYuType.font(12)).foregroundStyle(.gray).frame(minHeight: 24).padding(.bottom, compact ? 6 : 12)
             OriginalLoginField(title: "手机号", text: $phone, icon: "phone", kind: .phone, focus: $focusedField)
@@ -84,7 +87,11 @@ import SwiftUI
                 } else {
                     HStack(spacing: 12) {
                         OriginalLoginField(title: "验证码", text: $smsCode, kind: .code, focus: $focusedField)
-                        Button(action: sendCode) { Text(countdown > 0 ? "\(countdown)s" : "发送").font(LinYuType.font(13)).lineLimit(1).frame(width: compact ? 66 : 84, height: 44) }
+                        Button(action: sendCode) {
+                            Text(countdown > 0 ? "\(countdown)s" : "发送").font(LinYuType.font(13)).lineLimit(1)
+                                .frame(width: compact ? 66 : 84, height: 44)
+                                .contentShape(RoundedRectangle(cornerRadius: 14))
+                        }
                             .foregroundStyle(.white).background(sending || countdown > 0 ? Color(linYuHex: 0x90CAF9) : blue, in: RoundedRectangle(cornerRadius: 14))
                             .buttonStyle(.plain).disabled(!canSubmitLogin || countdown > 0)
                     }
@@ -101,6 +108,7 @@ import SwiftUI
                         Text("登 录").font(LinYuType.font(submitFont, weight: .bold))
                     }
                 }.frame(maxWidth: .infinity).padding(.vertical, 8).frame(minHeight: 52)
+                    .contentShape(RoundedRectangle(cornerRadius: 14))
             }
             .buttonStyle(LoginSubmitButtonStyle(blue: blue))
             .disabled(!canSubmitLogin)
@@ -200,7 +208,6 @@ private struct LoginSubmitButtonStyle: ButtonStyle {
                     .overlay(shape.fill(.white.opacity(pressed ? 0.12 : 0)))
                     .shadow(color: .black.opacity(isEnabled && !pressed ? 0.22 : 0), radius: 4, y: 3)
             }
-            .contentShape(shape)
             .onChange(of: configuration.isPressed) { pressed in
 #if targetEnvironment(simulator)
                 if ProcessInfo.processInfo.environment["LINYU_LOGIN_DIAGNOSTICS"] == "1" {
@@ -231,10 +238,16 @@ private struct OriginalLoginField: View {
                 .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
                 .focused(focus, equals: kind).textInputAutocapitalization(.never).autocorrectionDisabled().accessibilityLabel(title)
             if kind != .code && !text.isEmpty {
-                Button { text = "" } label: { Text("✕").foregroundStyle(.gray).frame(width: 44, height: 44) }.buttonStyle(.plain).accessibilityLabel("清空" + title)
+                Button { text = "" } label: {
+                    Text("✕").foregroundStyle(.gray).frame(width: 44, height: 44).contentShape(Rectangle())
+                }.buttonStyle(.plain).accessibilityLabel("清空" + title)
             }
         }.padding(.horizontal, 16).frame(height: 56)
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(focused ? blue : Color(linYuHex: 0xBFC7D5), lineWidth: focused ? 2 : 1))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(focused ? blue : Color(linYuHex: 0xBFC7D5), lineWidth: focused ? 2 : 1)
+                    .allowsHitTesting(false).accessibilityHidden(true)
+            }
             .overlay(alignment: .topLeading) {
                 Text(title).font(LinYuType.font(raised ? 12 : 16)).foregroundStyle(focused ? blue : Color(linYuHex: 0x6B7280))
                     .padding(.horizontal, raised ? 4 : 0).background(raised ? .white : .clear)

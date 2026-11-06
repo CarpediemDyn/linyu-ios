@@ -244,6 +244,7 @@ struct LinYuPillNavigation: View {
                         .scaleEffect(selection == index ? 1.04 : 1)
                         .animation(.interpolatingSpring(stiffness: 400, damping: 28.8), value: selection)
                         .frame(maxWidth: .infinity, minHeight: 44)
+                        .contentShape(RoundedRectangle(cornerRadius: 22))
                         .background {
                             if selection == index {
                                 RoundedRectangle(cornerRadius: 22).fill(colors.accent)
@@ -255,7 +256,11 @@ struct LinYuPillNavigation: View {
         }.padding(4).frame(maxWidth: 260)
             .fixedSize(horizontal: false, vertical: true)
             .background(Color(linYuHex: colors.isDark ? 0x1A202C : 0xFFFFFF, alpha: Double(colors.isDark ? 184 : 216) / 255), in: RoundedRectangle(cornerRadius: 28))
-            .overlay(RoundedRectangle(cornerRadius: 28).stroke(Color(linYuHex: colors.isDark ? 0xFFFFFF : 0x000000, alpha: Double(colors.isDark ? 40 : 24) / 255), lineWidth: 1))
+            .overlay {
+                RoundedRectangle(cornerRadius: 28)
+                    .stroke(Color(linYuHex: colors.isDark ? 0xFFFFFF : 0x000000, alpha: Double(colors.isDark ? 40 : 24) / 255), lineWidth: 1)
+                    .allowsHitTesting(false).accessibilityHidden(true)
+            }
             .shadow(color: .black.opacity(0.22), radius: 10, y: 7)
     }
 }
