@@ -48,6 +48,13 @@ import SwiftUI
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Place the pill navigation outside the page's clipped/animated bounds.
+            // It must share the root safe area during theme or page transitions.
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if model.auth.session != nil && !showingShower && !inSettings {
+                    LinYuNavigationInset(selection: tab)
+                }
+            }
             .overlay(alignment: .top) {
                 OriginalToast(message: model.message) { text in
                     if model.message == text { model.message = "" }
@@ -81,9 +88,6 @@ import SwiftUI
                                 removal: .move(edge: direction > 0 ? .leading : .trailing).combined(with: .opacity)))
         .animation(.interpolatingSpring(stiffness: 420, damping: 32), value: page)
         .clipped()
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if !showingShower && !inSettings { LinYuNavigationInset(selection: tab) }
-        }
     }
     @ViewBuilder private var dialogContent: some View {
         switch dialog {
