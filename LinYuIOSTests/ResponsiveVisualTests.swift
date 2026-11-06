@@ -53,7 +53,7 @@ import XCTest
 
     func testShowerScannerAndDialogsAtShortHeight() async throws {
         let landscape = CGSize(width: 812, height: 320)
-        try await capture("shower", size: landscape) {
+        try await capture("shower-actions", size: landscape, scrollToBottom: true) {
             OriginalShowerContent(emoji: "🚿", status: "正在沐浴中", location: device.deviceName,
                                   preDeduct: 5, elapsed: 214, countdown: 46, hasCustomBackground: false,
                                   stopping: false, stopDisabled: false, continuingSettlement: false,
@@ -67,10 +67,10 @@ import XCTest
                 .environment(\.dynamicTypeSize, .accessibility3)
         }
         try await capture("scanner", size: landscape) { OriginalScannerView { _ in } }
-        try await capture("device-dialog", size: CGSize(width: 320, height: 310)) {
+        try await capture("device-dialog-actions", size: CGSize(width: 320, height: 310), scrollToBottom: true) {
             OriginalDeviceDetailContent(device: device, recovery: .unconfirmed, onConfirm: {}, onDismiss: {})
         }
-        try await capture("long-error", size: CGSize(width: 344, height: 290)) {
+        try await capture("long-error-actions", size: CGSize(width: 344, height: 290), scrollToBottom: true) {
             Color.clear.linYuModal(isPresented: .constant(true)) {
                 LinYuDialogCard {
                     VStack(spacing: 16) {
@@ -84,13 +84,15 @@ import XCTest
     }
 
     private func capture<Content: View>(_ name: String, size: CGSize, settle: UInt64 = 200_000_000,
+                                        scrollToBottom: Bool = false,
                                         @ViewBuilder content: () -> Content) async throws {
         let canvas = content()
             .frame(width: size.width, height: size.height)
             .background(LinYuPalette(isDark: false).background)
             .environment(\.linYuWindow, LinYuWindowLayout(size: size))
             .environment(\.linYuColors, LinYuPalette(isDark: false))
-        let image = try await captureHostedVisual(canvas, size: size, settle: settle)
+            .ignoresSafeArea()
+        let image = try await captureHostedVisual(canvas, size: size, settle: settle, scrollToBottom: scrollToBottom)
         XCTAssertEqual(image.size, size)
         let attachment = XCTAttachment(image: image)
         attachment.name = "responsive-\(name)-\(Int(size.width))x\(Int(size.height))"

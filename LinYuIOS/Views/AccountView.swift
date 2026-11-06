@@ -21,6 +21,8 @@ import SwiftUI
     var body: some View {
         GeometryReader { geometry in
             let window = LinYuWindowLayout(size: geometry.size)
+            let compact = window.narrow || window.short
+            let logoSize: CGFloat = window.short ? 48 : compact ? 56 : 80
             ZStack {
                 ZStack(alignment: .topLeading) {
                     LinearGradient(colors: [blue, Color(linYuHex: 0x0D47A1), Color(linYuHex: 0x051D40)], startPoint: .top, endPoint: .bottom)
@@ -31,13 +33,13 @@ import SwiftUI
                 }.ignoresSafeArea(.container).allowsHitTesting(false).accessibilityHidden(true)
                 ScrollView {
                     VStack(spacing: 0) {
-                        Image("OriginalLogo").resizable().frame(width: window.short ? 48 : 80, height: window.short ? 48 : 80).clipShape(RoundedRectangle(cornerRadius: 18))
-                        Text("淋 浴").font(LinYuType.font(30, weight: .bold)).foregroundStyle(.white).frame(minHeight: 44).padding(.top, 16)
+                        Image("OriginalLogo").resizable().frame(width: logoSize, height: logoSize).clipShape(RoundedRectangle(cornerRadius: 18))
+                        Text("淋 浴").font(LinYuType.font(30, weight: .bold)).foregroundStyle(.white).frame(minHeight: 44).padding(.top, compact ? 8 : 16)
                         Text("Hualala · 校园热水").font(LinYuType.font(13)).foregroundStyle(.white.opacity(0.55)).frame(minHeight: 24)
-                        loginCard(compact: window.narrow || window.short).padding(.top, window.short ? 12 : 20)
+                        loginCard(compact: compact).padding(.top, compact ? 12 : 20)
                     }
                     .padding(.horizontal, window.narrow ? 12 : 28)
-                    .padding(.top, window.short ? 12 : 24).padding(.bottom, 28)
+                    .padding(.top, compact ? 12 : 24).padding(.bottom, 24)
                     .frame(maxWidth: 510).frame(maxWidth: .infinity)
                     .scaleEffect(appeared ? 1 : 0.8, anchor: .top)
                     .frame(minHeight: geometry.size.height,
@@ -53,12 +55,12 @@ import SwiftUI
     private func loginCard(compact: Bool) -> some View {
         VStack(spacing: 0) {
             Text("欢迎回来").font(LinYuType.font(22, weight: .bold)).foregroundStyle(Color(linYuHex: 0x1A1A1A)).frame(minHeight: 32)
-            Text("请使用校园账号登录").font(LinYuType.font(13)).foregroundStyle(.gray).frame(minHeight: 24).padding(.top, 4).padding(.bottom, 20)
+            Text("请使用校园账号登录").font(LinYuType.font(13)).foregroundStyle(.gray).frame(minHeight: 24).padding(.top, 4).padding(.bottom, compact ? 8 : 20)
             Button(usePassword ? "验证码登录" : "密码登录") {
                 usePassword.toggle(); error = nil; password = ""; smsCode = ""
-            }.font(LinYuType.font(13)).foregroundStyle(blue).frame(minHeight: 48).padding(.bottom, 16).disabled(loggingIn)
+            }.font(LinYuType.font(13)).foregroundStyle(blue).frame(minHeight: 44).padding(.bottom, compact ? 4 : 16).disabled(loggingIn)
             Text(usePassword ? "未设置密码？请使用手机号验证码登录" : "未注册的手机号将自动创建账号")
-                .font(LinYuType.font(12)).foregroundStyle(.gray).frame(minHeight: 24).padding(.bottom, 12)
+                .font(LinYuType.font(12)).foregroundStyle(.gray).frame(minHeight: 24).padding(.bottom, compact ? 6 : 12)
             OriginalLoginField(title: "手机号", text: $phone, icon: "phone", kind: .phone)
             Group {
                 if usePassword {
@@ -71,7 +73,7 @@ import SwiftUI
                             .buttonStyle(.plain).disabled(!canSubmitLogin || countdown > 0)
                     }
                 }
-            }.padding(.top, 14).disabled(loggingIn)
+            }.padding(.top, compact ? 10 : 14).disabled(loggingIn)
             Button(action: login) {
                 Group {
                     if let loginFeedback {
@@ -88,7 +90,7 @@ import SwiftUI
             .disabled(!canSubmitLogin)
             .accessibilityLabel("登 录")
             .accessibilityValue(loggingIn ? "正在登录" : "")
-            .padding(.top, 24)
+            .padding(.top, compact ? 14 : 24)
             if let error {
                 Text(error).font(LinYuType.font(13)).foregroundStyle(Color(linYuHex: 0xC62828)).multilineTextAlignment(.center)
                     .padding(12).background(Color(linYuHex: 0xFFEBEE), in: RoundedRectangle(cornerRadius: 8)).padding(.top, 16)

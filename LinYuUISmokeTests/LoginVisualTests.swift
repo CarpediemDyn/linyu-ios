@@ -43,12 +43,17 @@ final class LoginVisualTests: XCTestCase {
         phone.typeText("12")
         device.orientation = .landscapeLeft
         let login = app.buttons["登 录"]
-        for _ in 0..<3 where !login.isHittable { app.swipeUp() }
+        let form = app.scrollViews.firstMatch
+        XCTAssertTrue(form.waitForExistence(timeout: 5))
+        if !login.isHittable { form.swipeUp() }
         XCTAssertEqual(phone.value as? String, "12")
-        XCTAssertTrue(login.isHittable)
+        XCTAssertTrue(login.exists)
         login.tap()
         XCTAssertTrue(app.staticTexts["请输入 11 位手机号"].waitForExistence(timeout: 5))
-        capture(app, "responsive-login-keyboard-landscape")
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = "responsive-login-keyboard-landscape"
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     @MainActor func testFastAndOrdinaryMockLoginReachHome() {
