@@ -1,0 +1,49 @@
+{
+  "source_commit": "f3434949f1c23aac5eb1f3135ceee8527e53934a",
+  "run_id": 42173058772,
+  "artifact_id": 13482772781,
+  "images": [
+    {
+      "file": "login-loading.png",
+      "original_attachment": "52F823A4-F45F-4103-B769-0EA6C9182FE8.png",
+      "original_sha256": "bd9a8e687606aa61ee915982515ca809ca511f9e0203a99e0eca85b2d551b5c5",
+      "original_size": [
+        1206,
+        2622
+      ],
+      "display_size": [
+        360,
+        783
+      ],
+      "processing": "size reduction only; simulator Mock data"
+    },
+    {
+      "file": "theme-dark.png",
+      "original_attachment": "1BB57BC8-2D9E-4F0A-BA9C-F90F3BDBCC41.png",
+      "original_sha256": "637999592849fee613f4b13fe792a189632f658a7a3afdcef3f0c9ef26e3403c",
+      "original_size": [
+        1206,
+        2622
+      ],
+      "display_size": [
+        360,
+        783
+      ],
+      "processing": "size reduction only; simulator Mock data"
+    },
+    {
+      "file": "theme-light-disabled.png",
+      "original_attachment": "082C18C1-E644-4CF3-86B8-CFF6E47C68CC.png",
+      "original_sha256": "da1ecab375a43e52d777b001e64e2eb468c6a4e7c882ddc1024d473f308e5d20",
+      "original_size": [
+        1206,
+        2622
+      ],
+      "display_size": [
+        360,
+        783
+      ],
+      "processing": "size reduction only; simulator Mock data"
+    }
+  ]
+}
