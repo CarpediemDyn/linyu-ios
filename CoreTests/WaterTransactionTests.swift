@@ -312,6 +312,37 @@ import XCTest
         _ = try WaterTransactionEngine(transport: ble, service: api, store: store, decodeWriteBack: { _ in nil })
     }
 
+    func testLegacyUploadUnknownDoesNotProvePhysicalClosure() throws {
+        let (_, ble, api, store) = try make()
+        let binding = MeterBinding(peripheralID: try XCTUnwrap(ble.peripheralID), ownerScope: session.ownerScope,
+                                   device: device, observedMAC: device.apiMAC, verifiedAt: Date())
+        let tx = WaterTransaction(id: UUID(), binding: binding, phase: .uploadUnknown, valve: .closed,
+                                  protocolType: "1", randomNumber: "", consumeDate: "261104120000",
+                                  orderNo: "historical", consumption: Data([0x80]), receipt: nil,
+                                  writeBack: nil, failureReportPending: false, lastError: nil, updatedAt: Date())
+        try store.save(WaterJournal(transactions: [tx]))
+        let engine = try WaterTransactionEngine(transport: ble, service: api, store: store, decodeWriteBack: { _ in nil })
+        let restored = try XCTUnwrap(engine.journal.transactions.first)
+        XCTAssertEqual(restored.valve, .unknown)
+        XCTAssertEqual(restored.usageState, .unconfirmed)
+        XCTAssertEqual(restored.consumption, tx.consumption)
+    }
+
+    func testLostUploadResponseChecksAccountBeforeAttemptingBluetooth() async throws {
+        let (engine, ble, api, _) = try make()
+        let binding = try await engine.pair(device: device, session: session)
+        try await engine.open(binding: binding, session: session)
+        let id = try XCTUnwrap(engine.journal.transactions.last?.id)
+        api.failUpload = true
+        do { try await engine.closeAndSettle(id: id, session: session); XCTFail("upload timed out") } catch WaterError.disconnected {}
+        api.recordedConsumption = true
+        ble.failCommand = 0x23
+        do { try await engine.recover(id: id, session: session); XCTFail("meter write-back needs Bluetooth") } catch {}
+        XCTAssertEqual(engine.journal.transactions.last?.billConfirmed, true)
+        XCTAssertEqual(api.uploadCalls, 1)
+        XCTAssertFalse(engine.busy)
+    }
+
     func testIdleOpenPreservesAmbiguousSettlementWithoutReusingIt() async throws {
         let (engine, ble, api, _) = try make()
         let binding = try await engine.pair(device: device, session: session)
