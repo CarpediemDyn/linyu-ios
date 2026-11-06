@@ -46,7 +46,8 @@ private final class LoginFeedbackURLProtocol: URLProtocol {
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             if isLogin, scenario == "failure" {
-                self.client?.urlProtocol(self, didFailWithError: URLError(.timedOut))
+                let timeout = URLError(.timedOut, userInfo: [NSLocalizedDescriptionKey: "The request timed out."])
+                self.client?.urlProtocol(self, didFailWithError: timeout)
                 return
             }
             let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1",
