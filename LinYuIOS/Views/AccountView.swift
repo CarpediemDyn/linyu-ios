@@ -216,6 +216,7 @@ private struct OriginalLoginField: View {
                 if kind == .password { SecureField("", text: $text).textContentType(.password) }
                 else { TextField("", text: $text).keyboardType(kind == .phone ? .phonePad : .numberPad).textContentType(kind == .phone ? .username : .oneTimeCode) }
             }.font(LinYuType.font(16)).foregroundStyle(Color(linYuHex: 0x1A1A1A)).tint(blue)
+                .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
                 .focused(focus, equals: kind).textInputAutocapitalization(.never).autocorrectionDisabled().accessibilityLabel(title)
             if kind != .code && !text.isEmpty {
                 Button { text = "" } label: { Text("✕").foregroundStyle(.gray).frame(width: 44, height: 44) }.buttonStyle(.plain).accessibilityLabel("清空" + title)
@@ -225,7 +226,8 @@ private struct OriginalLoginField: View {
             .overlay(alignment: .topLeading) {
                 Text(title).font(LinYuType.font(raised ? 12 : 16)).foregroundStyle(focused ? blue : Color(linYuHex: 0x6B7280))
                     .padding(.horizontal, raised ? 4 : 0).background(raised ? .white : .clear)
-                    .offset(x: raised ? 12 : (icon == nil ? 16 : 52), y: raised ? -8 : 18).allowsHitTesting(false)
+                    .offset(x: raised ? 12 : (icon == nil ? 16 : 52), y: raised ? -8 : 18)
+                    .allowsHitTesting(false).accessibilityHidden(true)
             }.padding(.top, 8).animation(.easeOut(duration: 0.15), value: raised)
     }
 }

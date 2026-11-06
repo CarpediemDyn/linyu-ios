@@ -17,6 +17,8 @@ final class LoginVisualTests: XCTestCase {
         capture(app, "login-password")
         let phone = app.textFields["手机号"]
         XCTAssertTrue(phone.exists)
+        XCTAssertFalse(app.staticTexts["手机号"].exists, "The floating label belongs to the editable field, not a covering accessibility element")
+        XCTAssertFalse(app.staticTexts["密码"].exists)
         phone.tap()
         phone.typeText("12")
         let login = app.buttons["登 录"]
