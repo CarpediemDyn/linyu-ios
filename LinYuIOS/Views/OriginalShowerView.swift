@@ -146,6 +146,8 @@ struct OriginalShowerContent: View {
     let onBack: () -> Void
     let onStop: () -> Void
     @Environment(\.linYuColors) private var colors
+    @ScaledMetric(relativeTo: .title2) private var statusSize: CGFloat = 22
+    @ScaledMetric(relativeTo: .headline) private var actionSize: CGFloat = 18
 
     var body: some View {
         GeometryReader { geometry in
@@ -156,7 +158,10 @@ struct OriginalShowerContent: View {
                         .ignoresSafeArea().accessibilityHidden(true)
                 }
                 ScrollView {
-                    details.padding(24).frame(minHeight: geometry.size.height)
+                    details(compact: geometry.size.height < 460)
+                        .padding(geometry.size.width < 360 ? 12 : 24)
+                        .frame(maxWidth: 520).frame(maxWidth: .infinity)
+                        .frame(minHeight: geometry.size.height)
                 }
                 Button(action: onBack) {
                     LinYuIcon(name: "arrow_back").foregroundStyle(colors.textPrimary)
@@ -169,20 +174,20 @@ struct OriginalShowerContent: View {
         }
     }
 
-    private var details: some View {
+    private func details(compact: Bool) -> some View {
         VStack(spacing: 0) {
             if !hasCustomBackground {
-                LinYuDeviceGlyph(emoji: emoji, size: 72).foregroundStyle(.white)
+                LinYuDeviceGlyph(emoji: emoji, size: compact ? 48 : 72).foregroundStyle(.white)
                     .padding(.bottom, 8)
             }
-            Text(status).font(LinYuType.font(22, weight: .bold)).foregroundStyle(colors.accent)
+            Text(status).font(LinYuType.font(statusSize, weight: .bold)).foregroundStyle(colors.accent)
                 .multilineTextAlignment(.center)
             Text(location).font(LinYuType.font(16)).foregroundStyle(colors.textSecondary)
                 .multilineTextAlignment(.center).padding(.top, 4)
-            preDeductCard(preDeduct).padding(.top, 32)
-            timerBadge(elapsed).padding(.top, 24)
+            preDeductCard(preDeduct).padding(.top, compact ? 16 : 32)
+            timerBadge(elapsed).padding(.top, compact ? 12 : 24)
             if countdown > 0 { countdownBadge(countdown).padding(.top, 12) }
-            stopButton.padding(.top, 48)
+            stopButton.padding(.top, compact ? 20 : 48)
             Text("费率: 0.041元/升 · 设备: \(String(location.suffix(6)))")
                 .font(LinYuType.font(11)).foregroundStyle(colors.textSecondary)
                 .multilineTextAlignment(.center).padding(.top, 16)
@@ -225,8 +230,10 @@ struct OriginalShowerContent: View {
             HStack(spacing: 8) {
                 if stopping || settling { OriginalWaterSpinner(size: 20, color: .white) }
                 Text(settling ? "正在结算..." : stopping ? "正在关闭..." : continuingSettlement ? "继 续 结 算" : "结 束 使 用")
-                    .font(LinYuType.font(18, weight: .bold)).tracking(4)
-            }.foregroundStyle(.white).frame(maxWidth: .infinity).frame(height: 56)
+                    .font(LinYuType.font(actionSize, weight: .bold)).tracking(2)
+                    .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+            }.foregroundStyle(.white).padding(.horizontal, 16).padding(.vertical, 8)
+                .frame(maxWidth: .infinity).frame(minHeight: 56)
                 .background(Color(linYuHex: 0xE53935, alpha: stopDisabled ? 0.4 : 1), in: Capsule())
                 .shadow(color: .black.opacity(0.24), radius: 4, y: 2)
         }.buttonStyle(.plain).disabled(stopDisabled)

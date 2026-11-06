@@ -22,19 +22,26 @@ import UIKit
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                Color.black
+                Color.black.ignoresSafeArea()
                 if cameraLive {
                     ScannerCamera(torch: torch, onCode: match, onError: { _ in cameraFailed = true }, onReady: { hasTorch = $0 })
-                        .id(cameraGeneration)
-                    OriginalScannerOverlay(size: geometry.size)
+                        .id(cameraGeneration).ignoresSafeArea()
                     VStack(spacing: 0) {
-                        header.padding(.top, geometry.safeAreaInsets.top + 4)
-                        Spacer()
-                        controls.padding(.bottom, geometry.safeAreaInsets.bottom + 24)
+                        header.padding(.top, 4)
+                        GeometryReader { space in
+                            OriginalScannerOverlay(size: space.size)
+                        }
+                        controls(compact: geometry.size.height < 460)
+                            .padding(.bottom, geometry.size.height < 460 ? 6 : 24)
                     }
-                } else { notice.padding(.top, geometry.safeAreaInsets.top).padding(.bottom, geometry.safeAreaInsets.bottom) }
+                    .frame(maxWidth: 620)
+                } else {
+                    ScrollView {
+                        notice.frame(minHeight: geometry.size.height)
+                    }
+                }
             }.frame(width: geometry.size.width, height: geometry.size.height)
-        }.ignoresSafeArea().background(.black).preferredColorScheme(.dark)
+        }.background(.black).preferredColorScheme(.dark)
         .statusBarHidden(false)
         .onChange(of: photo) { item in
             Task {
@@ -69,10 +76,11 @@ import UIKit
             Spacer()
         }.foregroundStyle(.white).padding(.horizontal, 4)
     }
-    private var controls: some View {
-        VStack(spacing: 18) {
+    private func controls(compact: Bool) -> some View {
+        VStack(spacing: compact ? 6 : 18) {
             Text(hint ?? "将二维码放入框内，自动扫描").font(LinYuType.font(13))
                 .foregroundStyle(hint == nil ? Color.white.opacity(0.75) : yellow)
+                .multilineTextAlignment(.center).padding(.horizontal, 12)
             HStack {
                 Spacer()
                 PhotosPicker(selection: $photo, matching: .images) { OriginalScanCircle(icon: "ic_photo_library") }.accessibilityLabel("从相册选择")
@@ -91,18 +99,24 @@ import UIKit
         VStack(spacing: 0) {
             Text(authorization != .authorized ? "需要相机权限" : "相机启动失败").font(LinYuType.font(18, weight: .bold)).foregroundStyle(.white)
             Text(noticeDescription).font(LinYuType.font(13)).foregroundStyle(.white.opacity(0.65)).padding(.top, 10)
-            HStack(spacing: 8) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { noticeActions }
+                VStack(spacing: 4) { noticeActions }
+            }.buttonStyle(.plain).font(LinYuType.font(14)).foregroundStyle(yellow).padding(.top, 12)
+        }.padding(.horizontal, 16).frame(maxWidth: 520)
+            .frame(maxWidth: .infinity).multilineTextAlignment(.center)
+    }
+
+    @ViewBuilder private var noticeActions: some View {
                 if authorization != .authorized {
-                    Button("授予权限", action: requestPermission)
+                    Button(action: requestPermission) { Text("授予权限").frame(minHeight: 44) }
                     if denied || authorization == .denied || authorization == .restricted {
                         Button("去设置") { if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) } }
                     }
                 } else {
-                    Button("重试") { cameraFailed = false; cameraGeneration = UUID() }
+                    Button { cameraFailed = false; cameraGeneration = UUID() } label: { Text("重试").frame(minHeight: 44) }
                 }
-                Button("返回") { dismiss() }
-            }.buttonStyle(.plain).font(LinYuType.font(14)).foregroundStyle(yellow).padding(.top, 16)
-        }.padding(.horizontal, 36).frame(maxWidth: .infinity, maxHeight: .infinity)
+                Button { dismiss() } label: { Text("返回").frame(minWidth: 44, minHeight: 44) }
     }
     private var noticeDescription: String {
         if authorization == .authorized { return "可能是相机被其他应用占用，或者设备不支持。稍后再试一次，或者重启一下手机" }
@@ -140,9 +154,9 @@ private struct OriginalScanCircle: View {
 struct OriginalScannerOverlay: View {
     let size: CGSize
     @State private var progress: CGFloat = 0
-    private var side: CGFloat { min(size.width * 0.72, 280) }
+    private var side: CGFloat { max(0, min(size.width * 0.72, size.height * 0.9, 280)) }
     private var left: CGFloat { (size.width - side) / 2 }
-    private var top: CGFloat { size.height * 0.5 - side * 0.62 }
+    private var top: CGFloat { (size.height - side) / 2 }
     var body: some View {
         ZStack(alignment: .topLeading) {
             Canvas { context, _ in
@@ -161,7 +175,7 @@ struct OriginalScannerOverlay: View {
                 context.stroke(path, with: .color(.white), style: StrokeStyle(lineWidth: 3, lineCap: .round))
             }
             Rectangle().fill(LinearGradient(colors: [.clear, Color(linYuHex: 0xFFC53D).opacity(0.85), .clear], startPoint: .top, endPoint: .bottom))
-                .frame(width: side - 8, height: 14).offset(x: left + 4, y: top + side * progress - 7)
+                .frame(width: max(0, side - 8), height: 14).offset(x: left + 4, y: top + side * progress - 7)
         }.allowsHitTesting(false).accessibilityHidden(true)
             .onAppear { withAnimation(.linear(duration: 2.2).repeatForever(autoreverses: true)) { progress = 1 } }
     }

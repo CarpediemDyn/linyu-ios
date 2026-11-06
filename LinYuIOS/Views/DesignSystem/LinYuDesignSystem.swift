@@ -41,6 +41,24 @@ extension EnvironmentValues {
     }
 }
 
+struct LinYuWindowLayout {
+    let size: CGSize
+    var narrow: Bool { size.width < 360 }
+    var short: Bool { size.height < 460 }
+    var pageMargin: CGFloat { narrow ? 12 : size.width >= 600 ? 28 : 20 }
+}
+
+private struct LinYuWindowKey: EnvironmentKey {
+    static let defaultValue = LinYuWindowLayout(size: CGSize(width: 390, height: 780))
+}
+
+extension EnvironmentValues {
+    var linYuWindow: LinYuWindowLayout {
+        get { self[LinYuWindowKey.self] }
+        set { self[LinYuWindowKey.self] = newValue }
+    }
+}
+
 enum LinYuType {
     static func font(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         .system(size: size, weight: weight)
@@ -73,7 +91,7 @@ struct LinYuButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var enabled
     var color: Color? = nil
     var cornerRadius: CGFloat = 16
-    var height: CGFloat = 40
+    var height: CGFloat = 44
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.font(LinYuType.font(14, weight: .medium))
             .padding(.horizontal, 24).frame(minHeight: height)
@@ -90,7 +108,7 @@ struct LinYuOutlinedButtonStyle: ButtonStyle {
     var color: Color? = nil
     var cornerRadius: CGFloat = 14
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label.font(LinYuType.font(14, weight: .medium)).padding(.horizontal, 20).frame(minHeight: 40)
+        configuration.label.font(LinYuType.font(14, weight: .medium)).padding(.horizontal, 20).frame(minHeight: 44)
             .foregroundStyle((color ?? colors.accent).opacity(enabled ? 1 : 0.38))
             .background(configuration.isPressed ? colors.accent.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: cornerRadius))
             .overlay(RoundedRectangle(cornerRadius: cornerRadius).stroke(colors.textSecondary.opacity(0.8), lineWidth: 1))
@@ -113,7 +131,7 @@ struct LinYuIconButton: View {
     var body: some View {
         Button(action: action) {
             LinYuIcon(name: icon, size: 20).foregroundStyle(colors.textPrimary)
-                .frame(width: 40, height: 40).background(filled ? colors.card : .clear, in: Circle())
+                .frame(width: 44, height: 44).background(filled ? colors.card : .clear, in: Circle())
         }.buttonStyle(.plain).accessibilityLabel(label)
     }
 }
@@ -134,16 +152,42 @@ struct LinYuTailText: View {
     }
 }
 
+private struct LinYuDialogHeight: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
 struct LinYuDialogCard<Content: View>: View {
     @Environment(\.linYuColors) private var colors
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @State private var measuredHeight: CGFloat = 0
     let content: Content
     init(@ViewBuilder content: () -> Content) { self.content = content() }
     var body: some View {
-        content.padding(24).frame(maxWidth: 560, alignment: .leading)
+        GeometryReader { geometry in
+            let tight = geometry.size.width < 360 || geometry.size.height < 460 || typeSize.isAccessibilitySize
+            let edge: CGFloat = tight ? 12 : 32
+            let available = max(1, geometry.size.height - 24)
+            ScrollView {
+                content
+                    .padding(tight ? 16 : 24)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background {
+                        GeometryReader { measured in
+                            Color.clear.preference(key: LinYuDialogHeight.self, value: measured.size.height)
+                        }
+                    }
+            }
+            .frame(width: max(1, min(560, geometry.size.width - 2 * edge)))
+            .frame(height: measuredHeight > 0 ? min(available, measuredHeight) : available)
             .background(colors.solidSurface, in: RoundedRectangle(cornerRadius: 28))
-            .foregroundStyle(colors.textPrimary).font(LinYuType.font(14))
-            .padding(.horizontal, 32)
-            .accessibilityAddTraits(.isModal)
+            .clipShape(RoundedRectangle(cornerRadius: 28))
+            .foregroundStyle(colors.textPrimary)
+            .font(LinYuType.font(14))
+            .onPreferenceChange(LinYuDialogHeight.self) { measuredHeight = $0 }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .accessibilityAddTraits(.isModal)
     }
 }
 
@@ -193,21 +237,22 @@ struct LinYuPillNavigation: View {
                 } label: {
                     HStack(spacing: 4) {
                         LinYuIcon(name: icons[index], size: 16)
-                        Text(titles[index]).font(LinYuType.font(11, weight: .medium))
+                        Text(titles[index]).font(LinYuType.font(11, weight: .medium)).lineLimit(1).minimumScaleFactor(0.8)
                     }.foregroundStyle(selection == index ? colors.onAccent : Color(linYuHex: colors.isDark ? 0x94A3B8 : 0x64748B))
                         .animation(.easeInOut(duration: 0.2), value: selection)
                         .scaleEffect(selection == index ? 1.04 : 1)
                         .animation(.interpolatingSpring(stiffness: 400, damping: 28.8), value: selection)
-                        .frame(width: 84, height: 42)
+                        .frame(maxWidth: .infinity, minHeight: 44)
                         .background {
                             if selection == index {
                                 RoundedRectangle(cornerRadius: 22).fill(colors.accent)
                                     .shadow(color: .black.opacity(0.12), radius: 2, y: 1).matchedGeometryEffect(id: "selection", in: pill)
                             }
                         }
-                }.buttonStyle(.plain).accessibilityIdentifier("linyu.tab.\(index)")
+                }.buttonStyle(.plain).accessibilityLabel(titles[index]).accessibilityIdentifier("linyu.tab.\(index)")
             }
-        }.padding(4).frame(width: 260, height: 50)
+        }.padding(4).frame(maxWidth: 260)
+            .fixedSize(horizontal: false, vertical: true)
             .background(Color(linYuHex: colors.isDark ? 0x1A202C : 0xFFFFFF, alpha: Double(colors.isDark ? 184 : 216) / 255), in: RoundedRectangle(cornerRadius: 28))
             .overlay(RoundedRectangle(cornerRadius: 28).stroke(Color(linYuHex: colors.isDark ? 0xFFFFFF : 0x000000, alpha: Double(colors.isDark ? 40 : 24) / 255), lineWidth: 1))
             .shadow(color: .black.opacity(0.22), radius: 10, y: 7)

@@ -8,6 +8,7 @@ private enum ProfilePanel: Equatable {
     @ObservedObject var model: OriginalAppModel
     var onSettingsVisibilityChanged: (Bool) -> Void = { _ in }
     @Environment(\.linYuColors) private var colors
+    @Environment(\.linYuWindow) private var window
     @State private var settings = false
     @State private var background = false
     @State private var editingProfile = false
@@ -72,11 +73,10 @@ private enum ProfilePanel: Equatable {
                     Text("Hualala \(ProfileReleaseCatalog.referenceVersion) · 哗啦啦啦啦让我去淋浴~")
                         .font(LinYuType.font(12)).foregroundStyle(colors.textSecondary)
                         .padding(.top, 8).padding(.bottom, 24)
-                } else {
-                    Spacer(minLength: 100)
                 }
             }
-            .padding(20)
+            .padding(window.pageMargin)
+            .frame(maxWidth: 680).frame(maxWidth: .infinity)
         }
     }
 

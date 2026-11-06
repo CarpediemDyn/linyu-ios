@@ -7,6 +7,7 @@ import UIKit
     let onScan: () -> Void
     let onStart: (CampusDevice) -> Void
     @Environment(\.linYuColors) private var colors
+    @Environment(\.linYuWindow) private var window
     private var hasActive: Bool { !model.activeBluetooth.isEmpty || !model.currentCloud.isEmpty }
     private var needsPermission: Bool { CBCentralManager.authorization != .allowedAlways }
     private var balanceText: String {
@@ -47,8 +48,9 @@ import UIKit
                     HStack(spacing: 8) { ProgressView().tint(colors.accent); Text("正在确认设备信息，请稍候").font(LinYuType.font(13)).foregroundStyle(colors.textSecondary) }
                         .frame(maxWidth: .infinity)
                 }
-                Color.clear.frame(height: 110)
-            }.padding(.horizontal, 20)
+            }
+            .padding(.horizontal, window.pageMargin).padding(.bottom, 12)
+            .frame(maxWidth: 680).frame(maxWidth: .infinity)
         }.refreshable { await refresh() }
             .onAppear { model.homeAppeared() }
             .task { if CBCentralManager.authorization == .allowedAlways { model.ble.startScan() } }
@@ -154,6 +156,9 @@ private struct OriginalSignalLegend: View {
 /// Plain values and inert callbacks make these rows reusable in visual fixtures.
 struct OriginalSavedDeviceRow: View {
     @Environment(\.linYuColors) private var colors
+    @Environment(\.linYuWindow) private var window
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @ScaledMetric(relativeTo: .body) private var nameSize: CGFloat = 16
     let name: String
     let emoji: String
     let address: String
@@ -162,10 +167,13 @@ struct OriginalSavedDeviceRow: View {
     var actionTitle: String? = nil
     let onUse: () -> Void
     var body: some View {
-        HStack(spacing: 14) {
+        let stack = window.narrow || typeSize.isAccessibilitySize
+        let layout = stack ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12)) : AnyLayout(HStackLayout(spacing: 14))
+        layout {
+            HStack(spacing: 14) {
             OriginalDeviceAvatar(emoji: emoji, active: active)
             VStack(alignment: .leading, spacing: 4) {
-                LinYuTailText(text: name.isEmpty ? "热水器" : name).foregroundStyle(colors.textPrimary)
+                Text(name.isEmpty ? "热水器" : name).font(LinYuType.font(nameSize, weight: .semibold)).foregroundStyle(colors.textPrimary)
                 if active {
                     HStack(spacing: 8) {
                         Text("使用中").font(LinYuType.font(11)).foregroundStyle(colors.warning).padding(.horizontal, 6).padding(.vertical, 2)
@@ -173,12 +181,17 @@ struct OriginalSavedDeviceRow: View {
                         Text("点击恢复订单").font(LinYuType.font(12)).foregroundStyle(colors.textSecondary)
                     }
                 } else if let status {
-                    LinYuTailText(text: status, size: 12, weight: .regular).foregroundStyle(colors.textSecondary)
+                    Text(status).font(LinYuType.font(12)).foregroundStyle(colors.textSecondary)
                 } else {
                     LinYuTailText(text: "MAC: " + address, size: 12, weight: .regular).foregroundStyle(colors.textSecondary)
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
-            Button(actionTitle ?? (active ? "恢复" : "开始"), action: onUse).buttonStyle(LinYuButtonStyle())
+            }
+            Button(action: onUse) {
+                Text(actionTitle ?? (active ? "恢复" : "开始"))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: stack ? .infinity : nil)
+            }.buttonStyle(LinYuButtonStyle())
         }.padding(16).frame(maxWidth: .infinity)
             .background(active ? colors.activeBackground : colors.card, in: RoundedRectangle(cornerRadius: 22))
             .overlay(RoundedRectangle(cornerRadius: 22).stroke(colors.border, lineWidth: 0.8))

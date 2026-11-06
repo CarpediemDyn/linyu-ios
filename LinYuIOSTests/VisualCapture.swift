@@ -3,7 +3,7 @@ import UIKit
 import XCTest
 
 /// Mounts production views that contain UIScrollView or other UIKit-backed content.
-@MainActor func captureHostedVisual<Content: View>(_ root: Content, size: CGSize) async throws -> UIImage {
+@MainActor func captureHostedVisual<Content: View>(_ root: Content, size: CGSize, settle: UInt64 = 200_000_000) async throws -> UIImage {
     let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
     let previous = scene.windows.first(where: \.isKeyWindow)
     let controller = UIHostingController(rootView: root)
@@ -12,7 +12,7 @@ import XCTest
     window.rootViewController = controller
     window.makeKeyAndVisible()
     defer { window.isHidden = true; previous?.makeKey() }
-    try await Task.sleep(nanoseconds: 200_000_000)
+    try await Task.sleep(nanoseconds: settle)
     let view = controller.view!
     view.layoutIfNeeded()
     let format = UIGraphicsImageRendererFormat(); format.scale = 2

@@ -4,6 +4,7 @@ import SwiftUI
     @ObservedObject var model: OriginalAppModel
     var onModalVisibilityChanged: (Bool) -> Void = { _ in }
     @Environment(\.linYuColors) private var colors
+    @Environment(\.linYuWindow) private var window
     @State private var dialog: WalletDialog?
     @State private var balanceDraft = ""
     @State private var initialRefreshComplete = false
@@ -48,10 +49,10 @@ import SwiftUI
                         .padding(.bottom, 24)
                 }
                 billsSection
-                Spacer(minLength: 100)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(20)
+            .padding(window.pageMargin)
+            .frame(maxWidth: 720).frame(maxWidth: .infinity)
         }
         .refreshable { await model.refresh() }
         .task(id: model.auth.session?.ownerScope) {
@@ -406,7 +407,7 @@ private struct OriginalWalletDeductButton: View {
         Button(action: deduction.action) {
             Text(deduction.processing ? "扣款中…" : "请求代扣")
                 .font(LinYuType.font(12)).foregroundStyle(.white)
-                .padding(.horizontal, 12).frame(height: 30)
+                .padding(.horizontal, 12).frame(minHeight: 44)
                 .background(deduction.processing ? colors.textSecondary.opacity(0.4) : colors.warning,
                             in: RoundedRectangle(cornerRadius: 10))
         }.buttonStyle(.plain).disabled(!deduction.enabled)

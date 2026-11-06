@@ -44,8 +44,6 @@ import SwiftUI
                     if showingShower {
                         OriginalShowerView(model: model, onBack: closeShowerPage)
                             .transition(.opacity)
-                    } else if !inSettings {
-                        LinYuPillNavigation(selection: tab).padding(.bottom, 22)
                     }
                 }
             }
@@ -83,6 +81,9 @@ import SwiftUI
                                 removal: .move(edge: direction > 0 ? .leading : .trailing).combined(with: .opacity)))
         .animation(.interpolatingSpring(stiffness: 420, damping: 32), value: page)
         .clipped()
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !showingShower && !inSettings { LinYuNavigationInset(selection: tab) }
+        }
     }
     @ViewBuilder private var dialogContent: some View {
         switch dialog {
@@ -139,6 +140,17 @@ import SwiftUI
     }
 }
 
+struct LinYuNavigationInset: View {
+    @Environment(\.linYuWindow) private var window
+    @Binding var selection: Int
+    var body: some View {
+        LinYuPillNavigation(selection: $selection)
+            .padding(.horizontal, 8)
+            .padding(.top, 6)
+            .padding(.bottom, window.short ? 4 : 14)
+    }
+}
+
 struct OriginalToast: View {
     let message: String
     let onFinish: (String) -> Void
@@ -153,7 +165,7 @@ struct OriginalToast: View {
                 .padding(.horizontal, 20).padding(.vertical, 16)
                 .background(Color(linYuHex: 0x1F2937), in: RoundedRectangle(cornerRadius: 16))
                 .shadow(color: .black.opacity(0.20), radius: 8, y: 4)
-                .padding(.horizontal, 24).padding(.top, 60)
+                .frame(maxWidth: 520).padding(.horizontal, 12).padding(.top, 8)
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
         }.allowsHitTesting(false)

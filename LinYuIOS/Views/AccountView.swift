@@ -3,6 +3,7 @@ import SwiftUI
 /// LoginScreen.kt: this card intentionally stays white in both app themes.
 @MainActor struct AccountView: View {
     @ObservedObject var auth: AuthManager
+    @ScaledMetric(relativeTo: .headline) private var submitFont: CGFloat = 17
     @State private var phone = ""
     @State private var password = ""
     @State private var smsCode = ""
@@ -19,28 +20,35 @@ import SwiftUI
 
     var body: some View {
         GeometryReader { geometry in
-            ZStack(alignment: .topLeading) {
+            let window = LinYuWindowLayout(size: geometry.size)
+            ZStack {
+                ZStack(alignment: .topLeading) {
                 LinearGradient(colors: [blue, Color(linYuHex: 0x0D47A1), Color(linYuHex: 0x051D40)], startPoint: .top, endPoint: .bottom)
                 Circle().fill(.white.opacity(0.04)).frame(width: 280, height: 280).offset(x: -120, y: -80)
                 Circle().fill(.white.opacity(0.06)).frame(width: 180, height: 180)
-                    .position(x: geometry.size.width - 30, y: geometry.size.height + geometry.safeAreaInsets.top + geometry.safeAreaInsets.bottom - 30)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    .offset(x: 60, y: 60)
+                }.ignoresSafeArea(.container).allowsHitTesting(false).accessibilityHidden(true)
                 ScrollView {
                     VStack(spacing: 0) {
-                        Image("OriginalLogo").resizable().frame(width: 80, height: 80).clipShape(RoundedRectangle(cornerRadius: 18))
+                        Image("OriginalLogo").resizable().frame(width: window.short ? 48 : 80, height: window.short ? 48 : 80).clipShape(RoundedRectangle(cornerRadius: 18))
                         Text("淋 浴").font(LinYuType.font(30, weight: .bold)).foregroundStyle(.white).frame(minHeight: 44).padding(.top, 16)
                         Text("Hualala · 校园热水").font(LinYuType.font(13)).foregroundStyle(.white.opacity(0.55)).frame(minHeight: 24)
-                        loginCard.padding(.top, 20)
-                    }.padding(.horizontal, 28).padding(.top, 90).padding(.bottom, 28)
-                        .offset(y: -50).scaleEffect(appeared ? 1 : 0.8)
+                        loginCard(compact: window.narrow || window.short).padding(.top, window.short ? 12 : 20)
+                    }
+                    .padding(.horizontal, window.narrow ? 12 : 28)
+                    .padding(.top, window.short ? 12 : 24).padding(.bottom, 28)
+                    .frame(maxWidth: 510).frame(maxWidth: .infinity)
+                    .scaleEffect(appeared ? 1 : 0.8, anchor: .top)
                 }.scrollDismissesKeyboard(.interactively)
-            }.ignoresSafeArea(.container)
+            }
         }.preferredColorScheme(.light)
             .onAppear { withAnimation(.easeInOut(duration: 0.4)) { appeared = true } }
             .onDisappear { countdownGeneration = UUID(); password = ""; smsCode = "" }
             .accessibilityIdentifier("linyu.login")
     }
 
-    private var loginCard: some View {
+    private func loginCard(compact: Bool) -> some View {
         VStack(spacing: 0) {
             Text("欢迎回来").font(LinYuType.font(22, weight: .bold)).foregroundStyle(Color(linYuHex: 0x1A1A1A)).frame(minHeight: 32)
             Text("请使用校园账号登录").font(LinYuType.font(13)).foregroundStyle(.gray).frame(minHeight: 24).padding(.top, 4).padding(.bottom, 20)
@@ -56,7 +64,7 @@ import SwiftUI
                 } else {
                     HStack(spacing: 12) {
                         OriginalLoginField(title: "验证码", text: $smsCode, kind: .code)
-                        Button(action: sendCode) { Text(countdown > 0 ? "\(countdown)s" : "发送").font(LinYuType.font(13)).lineLimit(1).frame(width: 84, height: 40) }
+                        Button(action: sendCode) { Text(countdown > 0 ? "\(countdown)s" : "发送").font(LinYuType.font(13)).lineLimit(1).frame(width: compact ? 66 : 84, height: 44) }
                             .foregroundStyle(.white).background(sending || countdown > 0 ? Color(linYuHex: 0x90CAF9) : blue, in: RoundedRectangle(cornerRadius: 14))
                             .buttonStyle(.plain).disabled(!canSubmitLogin || countdown > 0)
                     }
@@ -70,9 +78,9 @@ import SwiftUI
                             .frame(width: 22, height: 22)
                             .onAppear { loginFeedback.mark("feedback_view_appeared") }
                     } else {
-                        Text("登 录").font(LinYuType.font(17, weight: .bold))
+                        Text("登 录").font(LinYuType.font(submitFont, weight: .bold))
                     }
-                }.frame(maxWidth: .infinity).frame(height: 52)
+                }.frame(maxWidth: .infinity).padding(.vertical, 8).frame(minHeight: 52)
             }
             .buttonStyle(LoginSubmitButtonStyle(blue: blue))
             .disabled(!canSubmitLogin)
@@ -83,7 +91,7 @@ import SwiftUI
                 Text(error).font(LinYuType.font(13)).foregroundStyle(Color(linYuHex: 0xC62828)).multilineTextAlignment(.center)
                     .padding(12).background(Color(linYuHex: 0xFFEBEE), in: RoundedRectangle(cornerRadius: 8)).padding(.top, 16)
             }
-        }.padding(28).frame(maxWidth: .infinity)
+        }.padding(compact ? 16 : 28).frame(maxWidth: .infinity)
             .background {
                 RoundedRectangle(cornerRadius: 24, style: .circular).fill(.white)
                     .shadow(color: .black.opacity(0.20), radius: 12, y: 6)
@@ -189,7 +197,7 @@ private struct OriginalLoginField: View {
             }.font(LinYuType.font(16)).foregroundStyle(Color(linYuHex: 0x1A1A1A)).tint(blue)
                 .focused($focused).textInputAutocapitalization(.never).autocorrectionDisabled().accessibilityLabel(title)
             if kind != .code && !text.isEmpty {
-                Button { text = "" } label: { Text("✕").foregroundStyle(.gray).frame(width: 28, height: 36) }.buttonStyle(.plain).accessibilityLabel("清空" + title)
+                Button { text = "" } label: { Text("✕").foregroundStyle(.gray).frame(width: 44, height: 44) }.buttonStyle(.plain).accessibilityLabel("清空" + title)
             }
         }.padding(.horizontal, 16).frame(height: 56)
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(focused ? blue : Color(linYuHex: 0xBFC7D5), lineWidth: focused ? 2 : 1))

@@ -33,6 +33,24 @@ final class LoginVisualTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["请输入验证码"].waitForExistence(timeout: 3))
     }
 
+    @MainActor func testLandscapeLoginActionRemainsReachableWithKeyboard() {
+        let device = XCUIDevice.shared
+        device.orientation = .portrait
+        defer { device.orientation = .portrait }
+        let app = launchFixture("fast")
+        let phone = app.textFields["手机号"]
+        phone.tap()
+        phone.typeText("12")
+        device.orientation = .landscapeLeft
+        let login = app.buttons["登 录"]
+        for _ in 0..<3 where !login.isHittable { app.swipeUp() }
+        XCTAssertEqual(phone.value as? String, "12")
+        XCTAssertTrue(login.isHittable)
+        login.tap()
+        XCTAssertTrue(app.staticTexts["请输入 11 位手机号"].waitForExistence(timeout: 5))
+        capture(app, "responsive-login-keyboard-landscape")
+    }
+
     @MainActor func testFastAndOrdinaryMockLoginReachHome() {
         for scenario in ["fast", "ordinary"] {
             let app = launchFixture(scenario)

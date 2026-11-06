@@ -39,6 +39,7 @@ extension EnvironmentValues {
                 ZStack {
                 content
                     .environment(\.linYuColors, palette)
+                    .environment(\.linYuWindow, LinYuWindowLayout(size: geometry.size))
                     .environment(\.linYuThemeReveal, reveal)
                     .tint(palette.accent)
                 if revealStart != nil {
