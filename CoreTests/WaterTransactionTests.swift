@@ -343,6 +343,45 @@ import XCTest
         XCTAssertEqual(api.uploadCalls, 0)
     }
 
+    func testRateOnlyRecordCannotCloseAnotherRunningSession() async throws {
+        let (engine, ble, api, store) = try make()
+        let binding = try await engine.pair(device: device, session: session)
+        let tx = WaterTransaction(id: UUID(), binding: binding, phase: .rateReady, valve: .unknown,
+            protocolType: "1", randomNumber: "", consumeDate: "261104120000", orderNo: "rate-only",
+            consumption: nil, receipt: nil, writeBack: nil, failureReportPending: false,
+            lastError: nil, updatedAt: Date())
+        try store.save(WaterJournal(transactions: [tx]))
+        let restored = try WaterTransactionEngine(transport: ble, service: api, store: store, decodeWriteBack: { _ in nil })
+        ble.state = 1
+        do { try await restored.recover(id: tx.id, session: session); XCTFail("the app never attempted opening") }
+        catch WaterError.reconciliation {}
+        XCTAssertFalse(ble.commands.contains(0x22))
+        XCTAssertEqual(api.uploadCalls, 0)
+    }
+
+    func testAnotherAccountCannotAdoptAnAmbiguousChargeFromTheSameMeter() async throws {
+        let (engine, ble, api, _) = try make()
+        let binding = try await engine.pair(device: device, session: session)
+        try await engine.open(binding: binding, session: session)
+        let id = try XCTUnwrap(engine.journal.transactions.last?.id)
+        api.failUpload = true
+        do { try await engine.closeAndSettle(id: id, session: session); XCTFail("upload timed out") }
+        catch WaterError.disconnected {}
+
+        api.failUpload = false
+        let other = QzxySession(telephone: "13900139000", loginCode: "another", userId: "8",
+                                accountId: "1", projectId: "513")
+        let otherBinding = try await engine.pair(device: device, session: other)
+        let before = ble.commands.count
+        do { try await engine.open(binding: otherBinding, session: other); XCTFail("another account owns the record") }
+        catch WaterError.reconciliation {}
+        do { _ = try await engine.adoptPending(binding: otherBinding, session: other); XCTFail("cannot adopt it") }
+        catch WaterError.reconciliation {}
+        XCTAssertEqual(Array(ble.commands.dropFirst(before)), [0x23, 0x23])
+        XCTAssertEqual(api.uploadCalls, 1)
+        XCTAssertEqual(engine.journal.transactions.map(\.id), [id])
+    }
+
     func testLostUploadResponseChecksAccountBeforeAttemptingBluetooth() async throws {
         let (engine, ble, api, _) = try make()
         let binding = try await engine.pair(device: device, session: session)

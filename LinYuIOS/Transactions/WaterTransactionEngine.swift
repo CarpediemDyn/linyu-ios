@@ -79,13 +79,24 @@ import Foundation
         journal.transactions.last { $0.isPending && !$0.idleConfirmed && $0.binding.ownerScope == session.ownerScope && sameDevice($0.binding, binding) }
     }
 
+    private func hasUsageEvidence(_ tx: WaterTransaction) -> Bool {
+        tx.phase != .rateRejected
+            && (tx.startedAt != nil || [.opening, .running, .closing].contains(tx.phase) || tx.isSettlementRecovery)
+    }
+
+    private func latestUnresolvedUsage(for binding: MeterBinding) -> WaterTransaction? {
+        journal.transactions.last { $0.isPending && sameDevice($0.binding, binding) && hasUsageEvidence($0) }
+    }
+
     private func hasNewerUsage(than tx: WaterTransaction) -> Bool {
         guard let index = journal.transactions.firstIndex(where: { $0.id == tx.id }) else { return false }
         return journal.transactions.dropFirst(index + 1).contains {
-            $0.binding.ownerScope == tx.binding.ownerScope && sameDevice($0.binding, tx.binding)
-                && ($0.startedAt != nil || [.opening, .closing].contains($0.phase) || $0.isSettlementRecovery)
-                && $0.phase != .rateRejected
+            sameDevice($0.binding, tx.binding) && hasUsageEvidence($0)
         }
+    }
+
+    private func mayCloseRunningValve(for tx: WaterTransaction) -> Bool {
+        [.opening, .running, .closing].contains(tx.phase) && !tx.isSettlementRecovery && !hasNewerUsage(than: tx)
     }
 
     private func confirmClosure(_ tx: inout WaterTransaction, by evidence: ValveClosureEvidence) {
@@ -192,11 +203,11 @@ import Foundation
         let reconnect = pending(binding, session: session)?.valve == .unknown
         let state = try await verified(binding, session: session, reconnect: reconnect, trace: trace)
         if [3, 6].contains(state.state) {
-            let unresolved = journal.transactions.last {
-                $0.isPending && $0.binding.ownerScope == session.ownerScope && sameDevice($0.binding, binding)
-                    && $0.isSettlementRecovery
+            let unresolved = latestUnresolvedUsage(for: binding)
+            if let unresolved, unresolved.binding.ownerScope != session.ownerScope {
+                throw WaterError.reconciliation
             }
-            var tx = pending(binding, session: session) ?? unresolved ?? newRecord(binding: binding, state: state)
+            var tx = unresolved ?? newRecord(binding: binding, state: state)
             guard !hasNewerUsage(than: tx) else { throw WaterError.reconciliation }
             confirmClosure(&tx, by: .verifiedDeviceState)
             try save(tx)
@@ -209,7 +220,8 @@ import Foundation
         if state.state != 0 {
             guard state.state == 1 else { throw WaterError.invalid("设备状态待核实，请重新连接") }
             // Original resumes only a local active order for this same device.
-            guard var tx = pending(binding, session: session), tx.usageState == .running else {
+            guard var tx = pending(binding, session: session), tx.usageState == .running,
+                  !hasNewerUsage(than: tx) else {
                 throw WaterError.invalid("设备正在使用中")
             }
             tx.phase = .running; tx.valve = .open; tx.lastError = nil
@@ -305,7 +317,7 @@ import Foundation
             var closedOnThisConnection = false
             if state.state == 1 {
                 // A settlement record cannot authorize stopping a later session.
-                guard !tx.isSettlementRecovery, !hasNewerUsage(than: tx) else { throw WaterError.reconciliation }
+                guard mayCloseRunningValve(for: tx) else { throw WaterError.reconciliation }
                 stage = "确认关阀（0x22）"
                 tx.phase = .closing; tx.valve = .unknown; tx.idleConfirmed = false; try save(tx)
                 do {
@@ -338,6 +350,9 @@ import Foundation
             }
             stage = "确认水表关闭状态（0x23）"
             guard [0, 3, 6].contains(state.state) else { throw WaterError.invalid("设备关闭状态未确认") }
+            if state.state != 0, [.rateRequested, .rateReady].contains(tx.phase) {
+                throw WaterError.reconciliation
+            }
             let wasClosed = tx.closureEvidence != nil
             confirmClosure(&tx, by: .verifiedDeviceState)
             if state.state == 0, !closedOnThisConnection { tx.idleConfirmed = true }
@@ -501,7 +516,7 @@ import Foundation
         guard tx.isPending else { return }
         let state = try await verified(tx.binding, session: session)
         if state.state == 1 {
-            guard !tx.isSettlementRecovery, !hasNewerUsage(than: tx) else { throw WaterError.reconciliation }
+            guard mayCloseRunningValve(for: tx) else { throw WaterError.reconciliation }
             tx.valve = .unknown
             do { try save(tx) } catch { }
             do {
@@ -520,7 +535,10 @@ import Foundation
     func adoptPending(binding: MeterBinding, session: QzxySession) async throws -> UUID {
         try begin(); defer { end() }
         let state = try await verified(binding, session: session)
-        if let existing = pending(binding, session: session) { return existing.id }
+        if let existing = latestUnresolvedUsage(for: binding) {
+            guard existing.binding.ownerScope == session.ownerScope else { throw WaterError.reconciliation }
+            return existing.id
+        }
         // State 1 alone cannot establish that someone else's active usage is ours.
         guard [3, 6].contains(state.state) else { throw WaterError.invalid("设备没有可补结算的记录；用水中的设备需本地活跃订单") }
         let tx = newRecord(binding: binding, state: state)
