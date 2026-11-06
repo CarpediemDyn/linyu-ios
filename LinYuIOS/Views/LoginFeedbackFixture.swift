@@ -4,19 +4,58 @@ import Foundation
 /// Drives the real login and home views from XCUITest without a real account.
 @MainActor enum LoginFeedbackFixture {
     static func model() -> OriginalAppModel? {
-        guard ProcessInfo.processInfo.environment["LINYU_LOGIN_FIXTURE"] != nil else { return nil }
+        guard let scenario = ProcessInfo.processInfo.environment["LINYU_LOGIN_FIXTURE"] else { return nil }
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [LoginFeedbackURLProtocol.self]
         let api = QzxyAPI(session: URLSession(configuration: configuration))
-        var savedSession: Data?
+        let session = QzxySession(telephone: "00000000000", loginCode: "fixture", userId: "7",
+                                  accountId: "8", projectId: "9")
+        var savedSession: Data? = scenario == "settlement-offline" ? try? JSONEncoder().encode(session) : nil
         let storage = AuthManager.SessionStorage(
             load: { savedSession },
             save: { savedSession = $0; return true },
             delete: { savedSession = nil }
         )
-        return OriginalAppModel(authentication: AuthManager(api: api, storage: storage), network: api,
-                                cloudController: CloudShowerController(api: api, mqttEnabled: false))
+        let auth = AuthManager(api: api, storage: storage)
+        let manager = scenario == "settlement-offline"
+            ? TransactionManager(transport: UnavailableFixtureMeter(), auth: auth, service: api, store: FixtureJournal(session))
+            : nil
+        return OriginalAppModel(authentication: auth, network: api,
+                                cloudController: CloudShowerController(api: api, mqttEnabled: false),
+                                transactionManager: manager)
     }
+}
+
+@MainActor private final class FixtureJournal: WaterJournalStore {
+    private var journal: WaterJournal
+
+    init(_ session: QzxySession) {
+        let started = Date(timeIntervalSince1970: 1_793_785_000)
+        journal = WaterJournal(transactions: ["447", "450"].map { number in
+            let mac = "C47F0E3E4C" + (number == "447" ? "A1" : "A2")
+            let device = LedgerDevice(deviceId: number, snCode: number, name: "学生公寓 D7 四层 \(number)",
+                                      macAddress: mac, realMac: nil, bigTypeId: "4", smallTypeId: "1")
+            let binding = MeterBinding(peripheralID: UUID(), ownerScope: session.ownerScope, device: device,
+                                       observedMAC: mac, verifiedAt: started)
+            return WaterTransaction(id: UUID(), binding: binding, phase: .uploadUnknown, valve: .closed,
+                protocolType: "1", randomNumber: "", consumeDate: "261104120000", orderNo: number,
+                consumption: Data([0x80]), receipt: nil, writeBack: nil, failureReportPending: false,
+                lastError: nil, updatedAt: started, startedAt: started)
+        })
+    }
+
+    func load() throws -> WaterJournal { journal }
+    func save(_ next: WaterJournal) throws { journal = next }
+}
+
+@MainActor private final class UnavailableFixtureMeter: WaterMeterTransport {
+    let peripheralID: UUID? = nil
+    let connectionID = UUID()
+    func isAvailableForRecovery(_ id: UUID) -> Bool { false }
+    func connectForTransaction(to id: UUID) async throws { throw WaterError.disconnected }
+    func reconnectForTransaction(to id: UUID) async throws { throw WaterError.disconnected }
+    func exchange(_ command: UInt8, payload: Data) async throws -> Data { throw WaterError.disconnected }
+    func disconnect() {}
 }
 
 private final class LoginFeedbackURLProtocol: URLProtocol {
@@ -39,6 +78,9 @@ private final class LoginFeedbackURLProtocol: URLProtocol {
             default: delay = 0
             }
             body = #"{"success":true,"data":{"loginCode":"fixture","userId":7,"userAccount":{"accountId":8,"projectId":9}}}"#
+        } else if scenario == "settlement-offline", url.path == "/order/query/account/bill/list" {
+            delay = 1
+            body = #"{"success":true,"data":[{"consumeBillDTO":{"orderId":"bill-447","orderNo":"447","deviceSnCode":"447","consumeDate":"2026-11-04 12:00:00","consumeMoney":"0.41","description":"fixture"}}]}"#
         } else {
             delay = url.path == "/user/verification/code/get" ? 6 : 0
             body = #"{"success":true,"data":null}"#

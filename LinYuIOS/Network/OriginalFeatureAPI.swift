@@ -55,7 +55,8 @@ extension QzxyAPI {
                   let id = OriginalJSON.text(data["orderId"]), let date = OriginalJSON.text(data["consumeDate"]),
                   let money = OriginalJSON.text(data["consumeMoney"]), let description = OriginalJSON.text(data["description"]) else { throw QzxyError.invalidResponse }
             return CampusBill(orderId: id, consumeDate: date, consumeMoney: money, description: description,
-                              orderNo: OriginalJSON.text(data["orderNo"]))
+                              orderNo: OriginalJSON.text(data["orderNo"]),
+                              deviceSnCode: OriginalJSON.nonempty(OriginalJSON.text(data["deviceSnCode"])))
         }
     }
 

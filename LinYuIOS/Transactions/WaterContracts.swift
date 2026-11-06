@@ -12,6 +12,7 @@ struct QzxySession: Codable {
 enum WaterError: LocalizedError {
     case busy, disconnected, timeout, storage, identity, unsupportedIdentity, reconciliation
     case invalid(String), rejected(String), recovered(String)
+    static let meterRecoveryGuidance = "当前未连接水表。可以先查询服务器结算记录；设备清账需要靠近原水表。"
     var errorDescription: String? {
         switch self {
         case .busy: return "已有操作或未结束订单，请先恢复处理"
@@ -76,6 +77,7 @@ enum WaterPhase: String, Codable {
     case uploading, uploadUnknown, serverRecorded, writeBackPending, completed, needsAttention, rateRejected, superseded
 }
 enum ValveFact: String, Codable { case unknown, open, closed }
+enum ValveClosureEvidence: String, Codable { case closeAcknowledgement, verifiedDeviceState }
 
 enum WaterUsageState: Equatable { case running, unconfirmed, settlementPending, archived }
 
@@ -99,18 +101,31 @@ struct WaterTransaction: Codable, Identifiable {
     var startedAt: Date? = nil
     var isPending: Bool { phase != .completed && phase != .rateRejected && phase != .superseded }
     var billConfirmed: Bool? = nil
+    var closureEvidence: ValveClosureEvidence? = nil
+    var closureConfirmedAt: Date? = nil
+    var legacyUnverifiedSettlement: Bool? = nil
+
+    var isSettlementRecovery: Bool {
+        closureEvidence != nil || valve == .closed || receipt != nil || billConfirmed == true
+            || [.closed, .collected, .uploading, .uploadUnknown, .serverRecorded, .writeBackPending, .needsAttention].contains(phase)
+    }
+
     var usageState: WaterUsageState {
         guard isPending else { return .archived }
-        // Older versions could leave an open flag on a settlement record.
-        if receipt != nil || [.collected, .uploading, .uploadUnknown, .serverRecorded, .writeBackPending].contains(phase) {
-            return .settlementPending
-        }
-        switch valve {
-        case .open: return .running
-        case .unknown: return .unconfirmed
-        case .closed: return .settlementPending
-        }
+        if valve == .closed, closureEvidence != nil { return .settlementPending }
+        if valve == .open, phase == .running { return .running }
+        return .unconfirmed
     }
+
+    func usageSeconds(at now: Date) -> Int? {
+        guard let startedAt else { return nil }
+        if usageState == .running { return max(0, Int(now.timeIntervalSince(startedAt))) }
+        // A later state query proves the device is closed now, not when the water stopped.
+        guard closureEvidence == .closeAcknowledgement, let closureConfirmedAt,
+              closureConfirmedAt >= startedAt else { return nil }
+        return Int(closureConfirmedAt.timeIntervalSince(startedAt))
+    }
+
     var statusText: String {
         if phase == .rateRejected { return "服务器拒绝本次启动，未向水表写入费率" }
         if phase == .superseded { return "设备已空闲，本次未确认的启动记录已结束" }
@@ -119,9 +134,10 @@ struct WaterTransaction: Codable, Identifiable {
             if writeBackAcknowledged { return "已关阀、已记账，设备写回已确认" }
             return idleConfirmed ? "已关阀、已记账，设备已空闲；写回回执未确认" : "已关阀、已记账"
         }
-        if receipt != nil || billConfirmed == true { return "服务器已记账，设备清账仍待确认" }
-        if phase == .uploading || phase == .uploadUnknown { return "已关阀，服务器处理结果待核实" }
-        if valve == .closed { return "阀已关闭，结算未完成" }
+        let valveStatus = usageState == .settlementPending ? "已确认关阀" : "阀门状态待核实"
+        if receipt != nil || billConfirmed == true { return "\(valveStatus)，服务器已记账，设备清账待确认" }
+        if phase == .uploading || phase == .uploadUnknown { return "\(valveStatus)，服务器处理结果待核实" }
+        if usageState == .settlementPending { return "已确认关阀，结算未完成" }
         if usageState == .running { return "用水中，尚未结算" }
         if phase == .closing { return "关闭未确认，请重试" }
         return "阀门状态未确认，请恢复核实"
@@ -137,6 +153,7 @@ struct WaterJournal: Codable {
 @MainActor protocol WaterMeterTransport: AnyObject {
     var peripheralID: UUID? { get }
     var connectionID: UUID { get }
+    func isAvailableForRecovery(_ id: UUID) -> Bool
     func connectForTransaction(to id: UUID) async throws
     func reconnectForTransaction(to id: UUID) async throws
     func exchange(_ command: UInt8, payload: Data) async throws -> Data

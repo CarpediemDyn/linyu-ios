@@ -336,11 +336,89 @@ import XCTest
         api.failUpload = true
         do { try await engine.closeAndSettle(id: id, session: session); XCTFail("upload timed out") } catch WaterError.disconnected {}
         api.recordedConsumption = true
-        ble.failCommand = 0x23
-        do { try await engine.recover(id: id, session: session); XCTFail("meter write-back needs Bluetooth") } catch {}
+        ble.availableForRecovery = false
+        let before = ble.commands
+        do { try await engine.recover(id: id, session: session); XCTFail("meter write-back needs Bluetooth") }
+        catch WaterError.invalid(let guidance) { XCTAssertEqual(guidance, WaterError.meterRecoveryGuidance) }
+        XCTAssertEqual(ble.commands, before)
         XCTAssertEqual(engine.journal.transactions.last?.billConfirmed, true)
         XCTAssertEqual(api.uploadCalls, 1)
         XCTAssertFalse(engine.busy)
+    }
+
+    func testCloseACKFreezesDurationBeforeReconnectAndSurvivesRelaunch() async throws {
+        let (engine, ble, api, store) = try make()
+        let binding = try await engine.pair(device: device, session: session)
+        try await engine.open(binding: binding, session: session)
+        let id = try XCTUnwrap(engine.journal.transactions.last?.id)
+        ble.failQueryAfterClose = true
+        do { try await engine.closeAndSettle(id: id, session: session); XCTFail("reconnect status should fail") }
+        catch WaterError.timeout {}
+        let restored = try WaterTransactionEngine(transport: ble, service: api, store: store, decodeWriteBack: { _ in nil })
+        let tx = try XCTUnwrap(restored.journal.transactions.first)
+        let stop = try XCTUnwrap(tx.closureConfirmedAt)
+        XCTAssertEqual(tx.closureEvidence, .closeAcknowledgement)
+        XCTAssertEqual(tx.usageState, .settlementPending)
+        XCTAssertNotNil(tx.usageSeconds(at: stop))
+        XCTAssertEqual(tx.usageSeconds(at: stop.addingTimeInterval(1141 * 60)), tx.usageSeconds(at: stop))
+        XCTAssertTrue(tx.lastError?.contains("0x23") == true)
+        XCTAssertFalse(restored.busy)
+    }
+
+    func testLegacyOrdersOnDifferentMetersStayIsolatedWhileCheckingBillsOffline() async throws {
+        let (_, ble, api, store) = try make()
+        let first = MeterBinding(peripheralID: UUID(), ownerScope: session.ownerScope,
+                                 device: device, observedMAC: device.apiMAC, verifiedAt: Date())
+        let otherDevice = LedgerDevice(deviceId: "447", snCode: "447", name: "D7 447", macAddress: "C47F0E3E4C11",
+                                       realMac: nil, bigTypeId: "4", smallTypeId: "1")
+        let second = MeterBinding(peripheralID: UUID(), ownerScope: session.ownerScope,
+                                  device: otherDevice, observedMAC: otherDevice.apiMAC, verifiedAt: Date())
+        let startedAt = Date(timeIntervalSince1970: 100)
+        let firstTx = WaterTransaction(id: UUID(), binding: first, phase: .uploadUnknown, valve: .closed,
+            protocolType: "1", randomNumber: "", consumeDate: "261104120000", orderNo: "450",
+            consumption: Data([0x80]), receipt: nil, writeBack: nil, failureReportPending: false,
+            lastError: nil, updatedAt: startedAt, startedAt: startedAt)
+        let secondTx = WaterTransaction(id: UUID(), binding: second, phase: .uploading, valve: .closed,
+            protocolType: "1", randomNumber: "", consumeDate: "261104120100", orderNo: "447",
+            consumption: Data([0x80, 1]), receipt: nil, writeBack: nil, failureReportPending: false,
+            lastError: nil, updatedAt: startedAt, startedAt: startedAt)
+        try store.save(WaterJournal(transactions: [firstTx, secondTx]))
+        let restored = try WaterTransactionEngine(transport: ble, service: api, store: store, decodeWriteBack: { _ in nil })
+        ble.availableForRecovery = false
+        api.recordedOrders = ["450"]
+        for id in [firstTx.id, secondTx.id, firstTx.id] {
+            do { try await restored.recover(id: id, session: session); XCTFail("no meter to reconcile") }
+            catch WaterError.invalid {}
+        }
+        let records = restored.journal.transactions
+        XCTAssertEqual(records.map(\.orderNo), ["450", "447"])
+        XCTAssertEqual(records.map(\.phase), [.uploadUnknown, .uploadUnknown])
+        XCTAssertEqual(records.map(\.valve), [.unknown, .unknown])
+        XCTAssertEqual(records.map(\.billConfirmed), [true, nil])
+        XCTAssertEqual(records.map { $0.usageSeconds(at: .now) }, [nil, nil])
+        XCTAssertEqual(records.map(\.consumption), [firstTx.consumption, secondTx.consumption])
+        XCTAssertEqual(api.checkedOrders, ["450", "447"])
+        XCTAssertEqual(api.uploadCalls, 0)
+        XCTAssertTrue(ble.commands.isEmpty)
+        XCTAssertFalse(restored.busy)
+    }
+
+    func testOldReceiptDoesNotWriteBackIfTheMeterContainsAnotherRecord() async throws {
+        let (engine, ble, api, _) = try make()
+        let binding = try await engine.pair(device: device, session: session)
+        try await engine.open(binding: binding, session: session)
+        let id = try XCTUnwrap(engine.journal.transactions.last?.id)
+        ble.failCommand = 0x86
+        try await engine.closeAndSettle(id: id, session: session)
+        let original = try XCTUnwrap(engine.journal.transactions.last?.consumption)
+        ble.failCommand = nil
+        ble.consumptionOverride = original + Data([1])
+        let before = ble.commands.count
+        do { try await engine.recover(id: id, session: session); XCTFail("another record") } catch WaterError.reconciliation {}
+        XCTAssertEqual(Array(ble.commands.dropFirst(before)), [0x23, 0x85])
+        XCTAssertEqual(api.uploadCalls, 1)
+        XCTAssertEqual(engine.journal.transactions.last?.consumption, original)
+        XCTAssertEqual(engine.journal.transactions.last?.phase, .writeBackPending)
     }
 
     func testIdleOpenPreservesAmbiguousSettlementWithoutReusingIt() async throws {
@@ -536,6 +614,8 @@ import XCTest
     var failUpload = false
     var billChecks = 0
     var recordedConsumption = false
+    var recordedOrders: Set<String> = []
+    var checkedOrders: [String] = []
     var failReport = false
     var rejectRate = false
     var consumeDate = "261104120000"
@@ -556,7 +636,8 @@ import XCTest
     }
     func hasRecordedConsumption(_ transaction: WaterTransaction, session: QzxySession) async throws -> Bool {
         billChecks += 1
-        return recordedConsumption
+        checkedOrders.append(transaction.orderNo)
+        return recordedConsumption || recordedOrders.contains(transaction.orderNo)
     }
     func reportFailure(consumeDate: String, session: QzxySession) async throws {
         failureCalls += 1
@@ -580,15 +661,18 @@ import XCTest
     var failCommand: UInt8?
     var commandDelay: UInt64 = 0
     var reconnectDelay: UInt64 = 0
+    var availableForRecovery = true
     var commands: [UInt8] = []
     var onOpening: (() -> Void)?
     var reconnected = false
     var opened = false
     var failQueryAfterOpening = false
+    var failQueryAfterClose = false
     var loseWriteBackACK = false
     var reconnectedBeforeCollect = false
     var disconnectCalls = 0
     init(id: UUID) { peripheralID = id }
+    func isAvailableForRecovery(_ id: UUID) -> Bool { availableForRecovery }
     func connectForTransaction(to id: UUID) async throws { peripheralID = id }
     func reconnectForTransaction(to id: UUID) async throws {
         if reconnectDelay > 0 { try await Task.sleep(nanoseconds: reconnectDelay) }
@@ -611,7 +695,7 @@ import XCTest
         if command == 0x22 { state = 3; reconnected = false }
         if command == 0x86 { state = 0 }
         if command == 0x23 {
-            if opened && failQueryAfterOpening { throw WaterError.timeout }
+            if (opened && failQueryAfterOpening) || (state == 3 && failQueryAfterClose) { throw WaterError.timeout }
             var b = [UInt8](repeating: 0, count: stateLength)
             b[0] = 0x80; put(project, into: &b, at: 1); put(device, into: &b, at: 5)
             put(stateAccount, into: &b, at: 9)

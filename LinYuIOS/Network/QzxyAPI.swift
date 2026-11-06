@@ -173,25 +173,45 @@ struct QzxyAPI: WaterMeterService {
     }
 
     @MainActor func hasRecordedConsumption(_ transaction: WaterTransaction, session: QzxySession) async throws -> Bool {
-        guard !transaction.orderNo.isEmpty else { return false }
+        guard transaction.binding.ownerScope == session.ownerScope, !session.loginCode.isEmpty else {
+            throw WaterError.identity
+        }
+        let orderNo = transaction.orderNo.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !orderNo.isEmpty else { return false }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
         formatter.dateFormat = "yyyy-MM"
-        let fallback = formatter.string(from: transaction.startedAt ?? transaction.updatedAt)
-        let date = transaction.consumeDate
-        let month: String
-        if date.range(of: #"^[0-9]{12}$"#, options: .regularExpression) != nil {
-            month = "20" + date.prefix(2) + "-" + date.dropFirst(2).prefix(2)
-        } else if date.range(of: #"^[0-9]{4}-[0-9]{2}"#, options: .regularExpression) != nil {
-            month = String(date.prefix(7))
-        } else {
-            month = fallback
-        }
+        let localDate = Self.settlementBillDate(transaction.consumeDate, timeZone: formatter.timeZone)
+        let month = formatter.string(from: localDate ?? transaction.startedAt ?? transaction.updatedAt)
         let rows = try await bills(month: month, session: session)
-        return rows.contains {
-            ($0.orderNo == transaction.orderNo || $0.orderId == transaction.orderNo) && $0.amount.isFinite && $0.amount > 0
+        let matches = rows.filter { $0.orderNo == orderNo || $0.orderId == orderNo }
+        guard matches.count == 1, let bill = matches.first, bill.amount.isFinite, bill.amount > 0 else {
+            // Missing and zero-amount rows may be delayed or pending and never authorize replay.
+            return false
         }
+        let billDate = Self.settlementBillDate(bill.consumeDate, timeZone: formatter.timeZone)
+        if let localDate, let billDate, abs(localDate.timeIntervalSince(billDate)) >= 1 { return false }
+
+        let serial = transaction.binding.device.snCode
+        if let billSerial = bill.deviceSnCode { return !serial.isEmpty && billSerial == serial }
+        if localDate != nil, billDate != nil { return true }
+
+        // If the timestamp cannot corroborate the order, require the existing read-only
+        // detail response to link the bill to this meter before persisting a positive match.
+        let detail = try await billDetail(orderId: bill.orderId, consumeDate: bill.consumeDate, session: session)
+        return !serial.isEmpty && detail.deviceSnCode == serial
+            && (detail.orderId == bill.orderId || detail.orderNo == orderNo)
+    }
+
+    private static func settlementBillDate(_ value: String, timeZone: TimeZone) -> Date? {
+        if value.range(of: #"^[0-9]{12}$"#, options: .regularExpression) != nil {
+            let parts = Array(value)
+            let day = "20\(String(parts[0..<2]))-\(String(parts[2..<4]))-\(String(parts[4..<6]))"
+            let time = "\(String(parts[6..<8])):\(String(parts[8..<10])):\(String(parts[10..<12]))"
+            return OriginalFormatting.billDate("\(day) \(time)", timeZone: timeZone)
+        }
+        return OriginalFormatting.billDate(value, timeZone: timeZone)
     }
 
     @MainActor func reportFailure(consumeDate: String, session: QzxySession) async throws {

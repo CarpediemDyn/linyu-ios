@@ -154,6 +154,13 @@ struct DiscoveredWaterMeter: Identifiable, Equatable {
         }
     }
 
+    func isAvailableForRecovery(_ id: UUID) -> Bool {
+        guard central.state == .poweredOn else { return false }
+        if peripheralID == id { return true }
+        // A remembered Core Bluetooth identifier is not proof of proximity.
+        return meters.contains { $0.id == id && Date().timeIntervalSince($0.lastSeen) <= 45 }
+    }
+
     func connectForTransaction(to id: UUID) async throws {
         try await prepareConnection(to: id, forceReconnect: false)
     }

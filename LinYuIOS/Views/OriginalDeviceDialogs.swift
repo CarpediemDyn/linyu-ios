@@ -41,7 +41,7 @@ struct OriginalDeviceDetailContent: View {
     private var canUse: Bool { (isActive || recovery != nil || (availability != .occupied && availability != .running)) && !busy }
     private var buttonTitle: String {
         if isActive { return "恢复使用" }
-        if recovery == .settlementPending { return "继续结算" }
+        if bluetoothRecovery?.isSettlementRecovery == true { return "继续核实结算" }
         if recovery == .unconfirmed { return "核实状态" }
         if availability == .occupied { return "他人使用中" }
         if availability == .running { return "设备使用中" }

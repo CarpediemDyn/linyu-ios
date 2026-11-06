@@ -27,6 +27,7 @@ struct CampusBill: Codable, Equatable, Identifiable {
     var consumeMoney: String
     var description: String
     var orderNo: String? = nil
+    var deviceSnCode: String? = nil
     var id: String { "\(orderId):\(consumeDate)" }
     var amount: Double { Double(consumeMoney) ?? 0 }
     var date: Date? { OriginalFormatting.billDate(consumeDate) }

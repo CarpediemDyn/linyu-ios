@@ -41,8 +41,14 @@ import SwiftUI
     }
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { timeline in
-            showerContent(at: timeline.date)
+        Group {
+            if record?.usageState == .running || order != nil {
+                TimelineView(.periodic(from: .now, by: 1)) { timeline in
+                    showerContent(at: timeline.date)
+                }
+            } else {
+                showerContent(at: .now)
+            }
         }
         .background {
             if hasCustomBackground {
@@ -60,13 +66,16 @@ import SwiftUI
 
     private func showerContent(at date: Date) -> some View {
         let device = self.device
-        let startedAt = record?.startedAt ?? order?.startedAt
-        let elapsed = startedAt.map { max(0, Int(date.timeIntervalSince($0))) } ?? 0
+        let elapsed = record?.usageSeconds(at: date)
+            ?? order.map { max(0, Int(date.timeIntervalSince($0.startedAt))) }
         let countdown = order?.autoDisconnectAt.map { max(0, Int(ceil($0.timeIntervalSince(date)))) } ?? 0
         let needsRecovery = record.map { $0.usageState != .running } ?? false
+        let isSettlementRecovery = record?.isSettlementRecovery == true
+        let needsNearbyMeter = isSettlementRecovery
+            && record.map { !model.ble.isAvailableForRecovery($0.binding.peripheralID) } == true
         return OriginalShowerContent(
             emoji: device?.emoji ?? "🚿",
-            status: settling ? "已确认关阀，正在结算" : needsRecovery ? (record?.statusText ?? "") : (device?.statusText ?? "正在沐浴中"),
+            status: needsRecovery ? (record?.statusText ?? "") : (device?.statusText ?? "正在沐浴中"),
             location: device?.displayName ?? "",
             preDeduct: device?.withholdMoney,
             elapsed: elapsed,
@@ -75,7 +84,11 @@ import SwiftUI
             stopping: stopping && !closeUnconfirmed,
             settling: settling,
             stopDisabled: stopDisabled,
-            continuingSettlement: record?.usageState == .settlementPending,
+            continuingSettlement: isSettlementRecovery,
+            recoveryNote: settling ? model.bluetoothSettlementProgress : record?.lastError,
+            meterGuidance: needsNearbyMeter ? WaterError.meterRecoveryGuidance : nil,
+            meterScan: needsNearbyMeter && !settling ? { model.ble.startScan() } : nil,
+            scanningForMeter: model.ble.scanning,
             onBack: onBack,
             onStop: requestStop
         )
@@ -104,7 +117,7 @@ import SwiftUI
 
     private func requestStop() {
         guard !stopDisabled else { return }
-        if record?.usageState == .settlementPending || stopTarget == nil {
+        if record?.isSettlementRecovery == true || stopTarget == nil {
             stop()
         } else {
             stopConfirmation = stopTarget
@@ -136,13 +149,17 @@ struct OriginalShowerContent: View {
     let status: String
     let location: String
     let preDeduct: Double?
-    let elapsed: Int
+    let elapsed: Int?
     let countdown: Int
     let hasCustomBackground: Bool
     let stopping: Bool
     var settling = false
     let stopDisabled: Bool
     let continuingSettlement: Bool
+    var recoveryNote: String? = nil
+    var meterGuidance: String? = nil
+    var meterScan: (() -> Void)? = nil
+    var scanningForMeter = false
     let onBack: () -> Void
     let onStop: () -> Void
     @Environment(\.linYuColors) private var colors
@@ -168,7 +185,7 @@ struct OriginalShowerContent: View {
                         .frame(width: 48, height: 48).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain).padding(8)
-                .accessibilityLabel("返回（不结束用水）")
+                .accessibilityLabel(continuingSettlement ? "返回首页" : "返回（不结束用水）")
                 .accessibilityIdentifier("linyu.shower.back")
             }
         }
@@ -184,10 +201,28 @@ struct OriginalShowerContent: View {
                 .multilineTextAlignment(.center)
             Text(location).font(LinYuType.font(16)).foregroundStyle(colors.textSecondary)
                 .multilineTextAlignment(.center).padding(.top, 4)
+            if let recoveryNote {
+                Text(recoveryNote).font(LinYuType.font(14)).multilineTextAlignment(.center)
+                    .foregroundStyle(colors.textSecondary).padding(.top, 8)
+                    .accessibilityIdentifier("linyu.shower.recovery-status")
+            }
             preDeductCard(preDeduct).padding(.top, compact ? 16 : 32)
             timerBadge(elapsed).padding(.top, compact ? 12 : 24)
             if countdown > 0 { countdownBadge(countdown).padding(.top, 12) }
+            if let meterGuidance {
+                Text(meterGuidance).font(LinYuType.font(14)).multilineTextAlignment(.center)
+                    .foregroundStyle(colors.textSecondary).padding(.top, 12)
+            }
             stopButton.padding(.top, compact ? 20 : 48)
+            if continuingSettlement {
+                if let meterScan {
+                    Button(scanningForMeter ? "正在扫描原水表…" : "扫描附近水表", action: meterScan)
+                        .buttonStyle(.plain).foregroundStyle(colors.accent)
+                        .frame(minHeight: 44).disabled(stopDisabled || scanningForMeter)
+                }
+                Button("返回首页", action: onBack)
+                    .buttonStyle(.plain).foregroundStyle(colors.accent).frame(minHeight: 44)
+            }
             Text("费率: 0.041元/升 · 设备: \(String(location.suffix(6)))")
                 .font(LinYuType.font(11)).foregroundStyle(colors.textSecondary)
                 .multilineTextAlignment(.center).padding(.top, 16)
@@ -206,11 +241,12 @@ struct OriginalShowerContent: View {
             .overlay(shape.strokeBorder(.white.opacity(colors.isDark ? 0.18 : 0.6), lineWidth: 1))
     }
 
-    private func timerBadge(_ seconds: Int) -> some View {
+    private func timerBadge(_ seconds: Int?) -> some View {
         HStack(spacing: 8) {
             Text("⏱").font(LinYuType.font(18))
-            Text("已用 \(timeText(seconds))").font(LinYuType.font(16, weight: .medium))
-                .foregroundStyle(colors.textPrimary)
+            Text(seconds.map { "\(continuingSettlement ? "本次用水" : "已用") \(timeText($0))" }
+                 ?? "上次用水时长待核实").font(LinYuType.font(16, weight: .medium))
+                .foregroundStyle(colors.textPrimary).accessibilityIdentifier("linyu.shower.duration")
         }.padding(.horizontal, 20).padding(.vertical, 10)
             .background(Color(linYuHex: colors.isDark ? 0x1D232E : 0xFFFFFF, alpha: 0.6),
                         in: RoundedRectangle(cornerRadius: 12))
@@ -229,7 +265,7 @@ struct OriginalShowerContent: View {
         Button(action: onStop) {
             HStack(spacing: 8) {
                 if stopping || settling { OriginalWaterSpinner(size: 20, color: .white) }
-                Text(settling ? "正在结算..." : stopping ? "正在关闭..." : continuingSettlement ? "继 续 结 算" : "结 束 使 用")
+                Text(settling ? "正在核实结算…" : stopping ? "正在关闭…" : continuingSettlement ? "继续核实结算" : "结 束 使 用")
                     .font(LinYuType.font(actionSize, weight: .bold)).tracking(2)
                     .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
             }.foregroundStyle(.white).padding(.horizontal, 16).padding(.vertical, 8)

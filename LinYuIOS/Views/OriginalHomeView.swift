@@ -23,7 +23,7 @@ import UIKit
                 header
                 activeSection
                 recoverySection("阀门状态待核实", records: model.unconfirmedBluetooth, action: "核实状态")
-                recoverySection("已关阀，待结算", records: model.unsettledBluetooth, action: "继续结算")
+                recoverySection("已关阀，待结算", records: model.unsettledBluetooth, action: "继续核实结算")
                 HStack {
                     LinYuSectionTitle(title: "附近设备")
                     Spacer(minLength: 8)
@@ -95,7 +95,8 @@ import UIKit
             ForEach(records) { record in
                 OriginalSavedDeviceRow(name: OriginalFormatting.deviceName(record.binding.device.name),
                                        emoji: "🚿", address: "", active: false,
-                                       status: record.statusText, actionTitle: action) { model.showShower = record.id }
+                                       status: record.statusText, actionTitle: record.isSettlementRecovery ? "继续核实结算" : action,
+                                       actionIdentifier: "linyu.recovery.\(record.binding.device.snCode)") { model.showShower = record.id }
                     .disabled(model.isBusy)
             }
         }
@@ -165,6 +166,7 @@ struct OriginalSavedDeviceRow: View {
     let active: Bool
     var status: String? = nil
     var actionTitle: String? = nil
+    var actionIdentifier: String? = nil
     let onUse: () -> Void
     var body: some View {
         let stack = window.narrow || typeSize.isAccessibilitySize
@@ -192,6 +194,7 @@ struct OriginalSavedDeviceRow: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: stack ? .infinity : nil)
             }.buttonStyle(LinYuButtonStyle())
+                .accessibilityIdentifier(actionIdentifier ?? "")
         }.padding(16).frame(maxWidth: .infinity)
             .background(active ? colors.activeBackground : colors.card, in: RoundedRectangle(cornerRadius: 22))
             .overlay(RoundedRectangle(cornerRadius: 22).stroke(colors.border, lineWidth: 0.8))

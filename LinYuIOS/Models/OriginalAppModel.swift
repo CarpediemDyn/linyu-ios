@@ -26,6 +26,7 @@ import WidgetKit
     @Published var working = false
     @Published private(set) var openingProgress: String?
     @Published private(set) var settlingBluetooth: UUID?
+    @Published private(set) var bluetoothSettlementProgress: String?
     @Published private(set) var unconfirmedBluetoothClose: UUID?
     @Published var refreshing = false
     @Published var codeCandidate: CampusCodeCandidate?
@@ -420,40 +421,61 @@ import WidgetKit
     }
 
     func endBluetooth(_ record: WaterTransaction) async {
-        guard let session = auth.session, !isBusy else { return }
-        let trace = logs.trace("ble_close")
+        guard let session = auth.session, !isBusy,
+              let current = bluetoothTransactions.first(where: { $0.id == record.id }) else { return }
+        let isRecovery = current.isSettlementRecovery
+        let trace = logs.trace(isRecovery ? "ble_settlement_recovery" : "ble_close")
         trace.mark("confirmed_tap")
         trace.onStage = { [weak self] stage in
-            if stage == "closed_saved" {
-                self?.settlingBluetooth = record.id
-                self?.message = "已确认关阀，正在结算"
-            } else if stage == "close_ack_missing" {
-                self?.unconfirmedBluetoothClose = record.id
-                self?.message = "关闭未确认，正在保存处理结果"
+            guard let self else { return }
+            if stage == "closed_saved" { settlingBluetooth = record.id }
+            if stage == "close_ack_missing" {
+                unconfirmedBluetoothClose = record.id
+                message = "关闭未确认，正在保存处理结果"
+            }
+            guard settlingBluetooth == record.id else { return }
+            switch stage {
+            case "bill_check": bluetoothSettlementProgress = "正在核实服务器账单"
+            case "close_query", "connecting", "reconnecting", "closed_saved":
+                bluetoothSettlementProgress = "正在连接原水表"
+            case "ble_ready": bluetoothSettlementProgress = "正在核实水表状态"
+            case "collect_sent", "verify_writeback_record": bluetoothSettlementProgress = "正在读取水表消费数据"
+            case "upload_request": bluetoothSettlementProgress = "正在上传消费数据"
+            case "writeback_sent": bluetoothSettlementProgress = "正在写回清账"
+            default: break
             }
         }
         working = true
-        if record.usageState == .settlementPending { settlingBluetooth = record.id }
-        defer {
-            settlingBluetooth = nil; unconfirmedBluetoothClose = nil
-            working = false; publishSnapshot()
+        if isRecovery {
+            settlingBluetooth = record.id
+            bluetoothSettlementProgress = nil
         }
-        if transactions.storageBlocked, record.usageState == .settlementPending {
+        defer {
+            settlingBluetooth = nil; bluetoothSettlementProgress = nil
+            unconfirmedBluetoothClose = nil; working = false; publishSnapshot()
+        }
+        if transactions.storageBlocked, isRecovery {
             message = WaterError.storage.localizedDescription
             trace.finish("settlement_pending")
             return
         }
         if transactions.storageBlocked { await transactions.closeOnly(id: record.id, session: session) }
         else { await transactions.close(id: record.id, session: session, trace: trace) }
-        if let current = transactions.journal.transactions.first(where: { $0.id == record.id }), current.valve == .closed {
-            message = current.isPending || transactions.storageBlocked
-                ? "已确认关阀，结算需要恢复：\(transactions.message)"
-                : transactions.message
-            trace.finish(current.isPending || transactions.storageBlocked ? "settlement_pending" : "settled")
-            if showShower == record.id { showShower = nil }
-            if current.receipt != nil || current.billConfirmed == true { refreshAfterWaterOperation() }
+        guard let updated = transactions.journal.transactions.first(where: { $0.id == record.id }) else {
+            trace.finish("transaction_missing")
+            return
+        }
+        let completed = !updated.isPending && !transactions.storageBlocked
+        let closed = updated.usageState == .settlementPending
+        if completed || closed || isRecovery {
+            message = updated.lastError ?? transactions.message
+            trace.finish(completed ? "settled" : closed ? "settlement_pending" : "valve_unconfirmed")
+            // Android exits active usage on a confirmed close. An explicit recovery visit
+            // stays available for the result and next action unless the record is complete.
+            if showShower == record.id, completed || (closed && !isRecovery) { showShower = nil }
+            if updated.receipt != nil || updated.billConfirmed == true { refreshAfterWaterOperation() }
         } else {
-            message = "关闭未确认，请重试：\(transactions.message)"
+            message = "关闭未确认，请重试：\(updated.lastError ?? transactions.message)"
             trace.finish("close_unconfirmed")
         }
     }

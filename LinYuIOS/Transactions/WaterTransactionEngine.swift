@@ -28,9 +28,13 @@ import Foundation
             if record.phase == .uploading { record.phase = .uploadUnknown }
             if record.phase == .superseded, !record.orderNo.isEmpty || !record.consumeDate.isEmpty || record.consumption != nil {
                 record.phase = .needsAttention
-                record.idleConfirmed = true
+                record.idleConfirmed = false
             }
-            if record.usageState == .settlementPending { record.valve = .closed }
+            if record.isPending, record.isSettlementRecovery, record.closureEvidence == nil {
+                record.legacyUnverifiedSettlement = true
+                record.valve = .unknown
+                record.idleConfirmed = false
+            }
             journal.transactions[i] = record
         }
     }
@@ -66,11 +70,30 @@ import Foundation
     }
 
     private func sameDevice(_ lhs: MeterBinding, _ rhs: MeterBinding) -> Bool {
-        lhs.peripheralID == rhs.peripheralID || lhs.device.snCode == rhs.device.snCode
+        lhs.observedMAC == rhs.observedMAC
+            && (lhs.peripheralID == rhs.peripheralID
+                || (!lhs.device.snCode.isEmpty && lhs.device.snCode == rhs.device.snCode))
     }
 
     private func pending(_ binding: MeterBinding, session: QzxySession) -> WaterTransaction? {
         journal.transactions.last { $0.isPending && !$0.idleConfirmed && $0.binding.ownerScope == session.ownerScope && sameDevice($0.binding, binding) }
+    }
+
+    private func hasNewerUsage(than tx: WaterTransaction) -> Bool {
+        guard let index = journal.transactions.firstIndex(where: { $0.id == tx.id }) else { return false }
+        return journal.transactions.dropFirst(index + 1).contains {
+            $0.binding.ownerScope == tx.binding.ownerScope && sameDevice($0.binding, tx.binding)
+                && ($0.startedAt != nil || [.opening, .closing].contains($0.phase) || $0.isSettlementRecovery)
+                && $0.phase != .rateRejected
+        }
+    }
+
+    private func confirmClosure(_ tx: inout WaterTransaction, by evidence: ValveClosureEvidence) {
+        tx.valve = .closed
+        if tx.closureEvidence == nil {
+            tx.closureEvidence = evidence
+            tx.closureConfirmedAt = Date()
+        }
     }
 
     func lookupMACs(_ address: String) -> [String] {
@@ -155,10 +178,12 @@ import Foundation
     }
 
     private func newRecord(binding: MeterBinding, state: BleDeviceState) -> WaterTransaction {
-        WaterTransaction(id: UUID(), binding: binding, phase: state.state == 1 ? .running : .closed,
-            valve: state.state == 1 ? .open : .closed, protocolType: state.protocolType,
+        var tx = WaterTransaction(id: UUID(), binding: binding, phase: state.state == 1 ? .running : .closed,
+            valve: state.state == 1 ? .open : .unknown, protocolType: state.protocolType,
             randomNumber: state.randomNumber, consumeDate: "", orderNo: "", consumption: nil, receipt: nil,
             writeBack: nil, failureReportPending: false, lastError: nil, updatedAt: Date())
+        if [0, 3, 6].contains(state.state) { confirmClosure(&tx, by: .verifiedDeviceState) }
+        return tx
     }
 
     func open(binding: MeterBinding, session: QzxySession, trace: LatencyTrace? = nil) async throws {
@@ -167,19 +192,17 @@ import Foundation
         let reconnect = pending(binding, session: session)?.valve == .unknown
         let state = try await verified(binding, session: session, reconnect: reconnect, trace: trace)
         if [3, 6].contains(state.state) {
-            let unresolvedUpload = journal.transactions.last {
+            let unresolved = journal.transactions.last {
                 $0.isPending && $0.binding.ownerScope == session.ownerScope && sameDevice($0.binding, binding)
-                    && $0.idleConfirmed && $0.consumption != nil && $0.receipt == nil
+                    && $0.isSettlementRecovery
             }
-            var tx = pending(binding, session: session) ?? unresolvedUpload ?? newRecord(binding: binding, state: state)
-            tx.valve = .closed
+            var tx = pending(binding, session: session) ?? unresolved ?? newRecord(binding: binding, state: state)
+            guard !hasNewerUsage(than: tx) else { throw WaterError.reconciliation }
+            confirmClosure(&tx, by: .verifiedDeviceState)
             try save(tx)
             defer { transport.disconnect() }
-            if tx.phase == .uploadUnknown || tx.billConfirmed == true || tx.idleConfirmed {
-                try await verifyUncertainSettlement(&tx, state: state, session: session)
-            } else {
-                try await settle(&tx, state: state, session: session, trace: trace)
-            }
+            if needsBillCheck(tx) { try await checkBill(&tx, session: session, trace: trace) }
+            try await settleClosed(&tx, state: state, session: session, trace: trace, freshClose: false)
             if tx.phase == .writeBackPending { throw WaterError.recovered(tx.lastError ?? "上一笔消费已记账，设备清账尚未完成，请重试恢复") }
             throw WaterError.recovered("已结清上一笔遗留账单，请重新点击开阀")
         }
@@ -197,7 +220,8 @@ import Foundation
         // A fresh idle query allows another attempt on this device. Other devices'
         // active orders do not block it. Preserve server receipts rather than discarding them.
         if var previous = pending(binding, session: session) {
-            previous.valve = .closed; previous.idleConfirmed = true
+            confirmClosure(&previous, by: .verifiedDeviceState)
+            previous.idleConfirmed = true
             if previous.receipt != nil || previous.billConfirmed == true {
                 previous.phase = .completed
                 previous.lastError = nil
@@ -209,7 +233,8 @@ import Foundation
         }
         let connection = transport.connectionID
         var tx = newRecord(binding: binding, state: state)
-        tx.phase = .rateRequested
+        tx.phase = .rateRequested; tx.valve = .unknown
+        tx.closureEvidence = nil; tx.closureConfirmedAt = nil
         try save(tx)
         do {
             trace?.mark("rate_request")
@@ -246,17 +271,33 @@ import Foundation
         try begin(); defer { end() }
         var tx = try record(id, session: session)
         guard tx.isPending else { return }
-        defer { if tx.valve == .closed { transport.disconnect() } }
+        var usedBluetooth = false
+        defer { if usedBluetooth, tx.valve == .closed { transport.disconnect() } }
+        var stage = "核实服务器账单"
         do {
-            let wasIdle = tx.idleConfirmed
-            // Relaunch after the 0x22 journal write can occur before the original disconnect.
-            let reconnect = tx.valve == .closed || [WaterPhase.uploadUnknown, .collected, .writeBackPending].contains(tx.phase)
+            let checkedBill = needsBillCheck(tx)
+            if checkedBill { try await checkBill(&tx, session: session, trace: trace) }
+            if tx.idleConfirmed, tx.closureEvidence != nil, tx.billConfirmed == true {
+                try completeIdle(&tx)
+                return
+            }
+            if tx.isSettlementRecovery {
+                guard !hasNewerUsage(than: tx) else { throw WaterError.reconciliation }
+                guard transport.isAvailableForRecovery(tx.binding.peripheralID) else {
+                    stage = "等待原水表"
+                    throw WaterError.invalid(WaterError.meterRecoveryGuidance)
+                }
+            }
+
+            usedBluetooth = true
+            stage = "连接水表并读取状态"
             trace?.mark("close_query")
-            var state = try await verified(tx.binding, session: session, reconnect: reconnect, trace: trace)
+            var state = try await verified(tx.binding, session: session, reconnect: tx.isSettlementRecovery, trace: trace)
             var closedOnThisConnection = false
             if state.state == 1 {
-                // An earlier confirmed closure cannot authorize stopping new running usage.
-                guard tx.valve != .closed, tx.receipt == nil else { throw WaterError.reconciliation }
+                // A settlement record cannot authorize stopping a later session.
+                guard !tx.isSettlementRecovery, !hasNewerUsage(than: tx) else { throw WaterError.reconciliation }
+                stage = "确认关阀（0x22）"
                 tx.phase = .closing; tx.valve = .unknown; tx.idleConfirmed = false; try save(tx)
                 do {
                     trace?.mark("close_sent")
@@ -270,9 +311,10 @@ import Foundation
                 }
                 closedOnThisConnection = true
                 trace?.mark("close_ack")
-                // The close ACK is a valve fact even if reconnection later fails.
-                tx.valve = .closed; tx.phase = .closed; try save(tx)
+                confirmClosure(&tx, by: .closeAcknowledgement)
+                tx.phase = .closed; try save(tx)
                 trace?.mark("closed_saved")
+                stage = "关阀后重新连接水表"
                 transport.disconnect()
                 trace?.mark("reconnecting")
                 do { try await transport.reconnectForTransaction(to: tx.binding.peripheralID) }
@@ -281,55 +323,87 @@ import Foundation
                     try await transport.reconnectForTransaction(to: tx.binding.peripheralID)
                 }
                 trace?.mark("ble_ready")
+                stage = "重连后读取水表状态（0x23）"
                 state = try await verified(tx.binding, session: session)
                 trace?.mark("settle_state_received")
             }
+            stage = "确认水表关闭状态（0x23）"
             guard [0, 3, 6].contains(state.state) else { throw WaterError.invalid("设备关闭状态未确认") }
-            let wasClosed = tx.valve == .closed
-            tx.valve = .closed
-            tx.idleConfirmed = wasIdle || (state.state == 0 && !closedOnThisConnection)
+            let wasClosed = tx.closureEvidence != nil
+            confirmClosure(&tx, by: .verifiedDeviceState)
+            if state.state == 0, !closedOnThisConnection { tx.idleConfirmed = true }
             try save(tx)
             if !wasClosed { trace?.mark("closed_saved") }
-            if state.state == 0, tx.receipt != nil {
-                tx.idleConfirmed = true
-                tx.phase = .completed; tx.lastError = nil; tx.failureReportPending = false; try save(tx)
-                return
+            stage = "恢复结算"
+            tx.lastError = nil
+            if state.state == 0, !closedOnThisConnection, !checkedBill, needsBillCheck(tx) {
+                try await checkBill(&tx, session: session, trace: trace)
             }
-            if tx.phase == .uploadUnknown || tx.billConfirmed == true || wasIdle || (state.state == 0 && !closedOnThisConnection) {
-                try await verifyUncertainSettlement(&tx, state: state, session: session)
-            } else {
-                try await settle(&tx, state: state, session: session, trace: trace)
-            }
+            try await settleClosed(&tx, state: state, session: session, trace: trace, freshClose: closedOnThisConnection)
         } catch {
-            tx.lastError = error.localizedDescription
-            if tx.receipt != nil { tx.phase = .writeBackPending }
-            try save(tx)
+            if !persistenceFailed {
+                if stage != "恢复结算" || tx.lastError == nil {
+                    tx.lastError = "\(stage)：\(error.localizedDescription)"
+                }
+                try save(tx)
+            }
             throw error
         }
     }
 
-    private func verifyUncertainSettlement(_ tx: inout WaterTransaction, state: BleDeviceState,
-                                          session: QzxySession) async throws {
-        if tx.receipt == nil, tx.billConfirmed != true {
-            tx.billConfirmed = try await service.hasRecordedConsumption(tx, session: session)
-            if tx.billConfirmed == true { try save(tx) }
-        }
-        if state.state == 0, tx.billConfirmed == true {
-            tx.phase = .completed
-            tx.idleConfirmed = true
-            tx.lastError = nil
-            tx.failureReportPending = false
+    private func needsBillCheck(_ tx: WaterTransaction) -> Bool {
+        tx.receipt == nil && tx.billConfirmed != true
+            && (tx.phase == .uploadUnknown || tx.idleConfirmed || tx.legacyUnverifiedSettlement == true)
+    }
+
+    private func checkBill(_ tx: inout WaterTransaction, session: QzxySession, trace: LatencyTrace?) async throws {
+        trace?.mark("bill_check")
+        let recorded = try await service.hasRecordedConsumption(tx, session: session)
+        trace?.mark(recorded ? "bill_recorded" : "bill_unconfirmed")
+        if recorded {
+            tx.billConfirmed = true
             try save(tx)
-            return
         }
-        if tx.billConfirmed == true {
-            throw WaterError.invalid("账单已核实，水表清账仍待确认")
+    }
+
+    private func completeIdle(_ tx: inout WaterTransaction) throws {
+        tx.phase = .completed
+        tx.idleConfirmed = true
+        tx.lastError = nil
+        tx.failureReportPending = false
+        try save(tx)
+    }
+
+    private func settleClosed(_ tx: inout WaterTransaction, state: BleDeviceState, session: QzxySession,
+                              trace: LatencyTrace?, freshClose: Bool) async throws {
+        if state.state == 0, !freshClose {
+            if tx.receipt != nil || tx.billConfirmed == true {
+                try completeIdle(&tx)
+                return
+            }
+            throw WaterError.invalid("水表当前空闲，服务器结算结果仍待核实")
         }
-        throw WaterError.invalid("服务器结算结果待核实，请稍后再查账单")
+        if tx.phase == .uploadUnknown || tx.billConfirmed == true {
+            throw WaterError.invalid(tx.billConfirmed == true
+                ? "账单已核实，原水表仍有遗留数据，缺少清账凭据"
+                : "服务器结算结果待核实，请稍后再次查询账单")
+        }
+        if !freshClose, tx.legacyUnverifiedSettlement == true, tx.consumption == nil {
+            throw WaterError.invalid("无法把水表遗留数据与这笔历史订单对应，请在账单中核对")
+        }
+        if !freshClose, tx.receipt != nil {
+            trace?.mark("verify_writeback_record")
+            let current = try await transport.exchange(0x85, payload: Data([0]))
+            guard current == tx.consumption, WaterProtocolIdentity.validConsumption(current) else {
+                throw WaterError.reconciliation
+            }
+        }
+        try await settle(&tx, state: state, session: session, trace: trace)
     }
 
     private func settle(_ tx: inout WaterTransaction, state: BleDeviceState, session: QzxySession, trace: LatencyTrace? = nil) async throws {
         if tx.receipt == nil {
+            var stage = "采集水表消费数据（0x85）"
             do {
                 trace?.mark("collect_sent")
                 let current = try await transport.exchange(0x85, payload: Data([0]))
@@ -337,10 +411,13 @@ import Foundation
                 guard WaterProtocolIdentity.validConsumption(current) else {
                     throw WaterError.invalid("设备返回的消费数据无效，请靠近后重试")
                 }
-                // Reconnect retry uses the current opaque record and fresh challenge, as Android does.
+                // Never attach a different meter record to an existing transaction.
+                if let previous = tx.consumption, previous != current { throw WaterError.reconciliation }
+                // Retry uses the meter's current protocol and fresh challenge.
                 tx.consumption = current; tx.protocolType = state.protocolType; tx.randomNumber = state.randomNumber
                 tx.phase = .collected; try save(tx)
                 tx.phase = .uploading; try save(tx)
+                stage = "上传消费数据"
                 trace?.mark("upload_request")
                 do {
                     tx.receipt = try await service.uploadConsumption(current, state: state, session: session)
@@ -355,8 +432,14 @@ import Foundation
             } catch {
                 // Original reports close/collection/upload failure, but never lets a failed
                 // report replace the actual valve or accounting outcome.
-                if !persistenceFailed, tx.phase != .uploadUnknown { await reportFailureIfNeeded(&tx, session: session) }
-                tx.lastError = error.localizedDescription; try save(tx)
+                if !persistenceFailed {
+                    let mismatch: Bool
+                    if let water = error as? WaterError, case .reconciliation = water { mismatch = true }
+                    else { mismatch = false }
+                    if tx.phase != .uploadUnknown, !mismatch { await reportFailureIfNeeded(&tx, session: session) }
+                    tx.lastError = "\(stage)：\(error.localizedDescription)"
+                    try save(tx)
+                }
                 throw error
             }
         }
@@ -401,7 +484,7 @@ import Foundation
         guard tx.isPending else { return }
         let state = try await verified(tx.binding, session: session)
         if state.state == 1 {
-            guard tx.valve != .closed, tx.receipt == nil else { throw WaterError.reconciliation }
+            guard !tx.isSettlementRecovery, !hasNewerUsage(than: tx) else { throw WaterError.reconciliation }
             tx.valve = .unknown
             do { try save(tx) } catch { }
             do {
@@ -412,7 +495,8 @@ import Foundation
                 throw error
             }
         } else if ![0, 3, 6].contains(state.state) { throw WaterError.invalid("关阀状态未确认") }
-        tx.valve = .closed; tx.lastError = "仅确认关阀，结算与清账仍需恢复处理"
+        confirmClosure(&tx, by: state.state == 1 ? .closeAcknowledgement : .verifiedDeviceState)
+        tx.phase = .closed; tx.lastError = "仅确认关阀，结算与清账仍需恢复处理"
         do { try save(tx) } catch { }
     }
 
