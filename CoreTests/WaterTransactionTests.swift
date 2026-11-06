@@ -297,7 +297,7 @@ import XCTest
         for _ in 0..<2 {
             do { try await restored.recover(id: id, session: session); XCTFail("missing bill") } catch {}
         }
-        XCTAssertEqual(Array(ble.commands.dropFirst(commandCount)), [0x23, 0x23])
+        XCTAssertEqual(ble.commands.count, commandCount)
         XCTAssertEqual(api.uploadCalls, 1)
         XCTAssertEqual(api.billChecks, 2)
         XCTAssertEqual(restored.journal.transactions.last?.consumption, closed.consumption)
@@ -326,6 +326,21 @@ import XCTest
         XCTAssertEqual(restored.valve, .unknown)
         XCTAssertEqual(restored.usageState, .unconfirmed)
         XCTAssertEqual(restored.consumption, tx.consumption)
+    }
+
+    func testLegacyCloseOnlyRecordCannotStopAnotherRunningSession() async throws {
+        let (engine, ble, api, store) = try make()
+        let binding = try await engine.pair(device: device, session: session)
+        try await engine.open(binding: binding, session: session)
+        var legacy = try XCTUnwrap(engine.journal.transactions.last)
+        legacy.valve = .closed // A legacy close-only operation did not advance the running phase.
+        try store.save(WaterJournal(transactions: [legacy]))
+        let restored = try WaterTransactionEngine(transport: ble, service: api, store: store, decodeWriteBack: { _ in nil })
+        do { try await restored.recover(id: legacy.id, session: session); XCTFail("another running session") }
+        catch WaterError.reconciliation {}
+        XCTAssertEqual(restored.journal.transactions.last?.usageState, .unconfirmed)
+        XCTAssertFalse(ble.commands.contains(0x22))
+        XCTAssertEqual(api.uploadCalls, 0)
     }
 
     func testLostUploadResponseChecksAccountBeforeAttemptingBluetooth() async throws {

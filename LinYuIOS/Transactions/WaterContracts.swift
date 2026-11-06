@@ -106,7 +106,7 @@ struct WaterTransaction: Codable, Identifiable {
     var legacyUnverifiedSettlement: Bool? = nil
 
     var isSettlementRecovery: Bool {
-        closureEvidence != nil || valve == .closed || receipt != nil || billConfirmed == true
+        legacyUnverifiedSettlement == true || closureEvidence != nil || valve == .closed || receipt != nil || billConfirmed == true
             || [.closed, .collected, .uploading, .uploadUnknown, .serverRecorded, .writeBackPending, .needsAttention].contains(phase)
     }
 

@@ -533,7 +533,7 @@ import XCTest
         XCTAssertFalse(manager.working)
         XCTAssertNil(model.settlingBluetooth)
         XCTAssertNil(model.bluetoothSettlementProgress)
-        XCTAssertTrue(model.message.contains(WaterError.meterRecoveryGuidance))
+        XCTAssertTrue(model.message.contains("服务器结算结果待核实"))
         XCTAssertFalse(LinYuWidgetStorage.load().orders.contains { $0.id == pending.id.uuidString })
         XCTAssertEqual(model.unsettledBluetooth.first?.id, pending.id)
         XCTAssertEqual(service.uploadCalls, 1)

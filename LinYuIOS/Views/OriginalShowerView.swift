@@ -73,6 +73,8 @@ import SwiftUI
         let isSettlementRecovery = record?.isSettlementRecovery == true
         let needsNearbyMeter = isSettlementRecovery
             && record.map { !model.ble.isAvailableForRecovery($0.binding.peripheralID) } == true
+        let recoveryNote = settling ? model.bluetoothSettlementProgress : record?.lastError
+        let showMeterGuidance = needsNearbyMeter && recoveryNote?.contains(WaterError.meterRecoveryGuidance) != true
         return OriginalShowerContent(
             emoji: device?.emoji ?? "🚿",
             status: needsRecovery ? (record?.statusText ?? "") : (device?.statusText ?? "正在沐浴中"),
@@ -85,8 +87,8 @@ import SwiftUI
             settling: settling,
             stopDisabled: stopDisabled,
             continuingSettlement: isSettlementRecovery,
-            recoveryNote: settling ? model.bluetoothSettlementProgress : record?.lastError,
-            meterGuidance: needsNearbyMeter ? WaterError.meterRecoveryGuidance : nil,
+            recoveryNote: recoveryNote,
+            meterGuidance: showMeterGuidance ? WaterError.meterRecoveryGuidance : nil,
             meterScan: needsNearbyMeter && !settling ? { model.ble.startScan() } : nil,
             scanningForMeter: model.ble.scanning,
             onBack: onBack,

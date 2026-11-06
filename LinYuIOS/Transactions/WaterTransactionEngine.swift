@@ -272,7 +272,11 @@ import Foundation
         var tx = try record(id, session: session)
         guard tx.isPending else { return }
         var usedBluetooth = false
-        defer { if usedBluetooth, tx.valve == .closed { transport.disconnect() } }
+        defer {
+            if usedBluetooth, tx.valve == .closed, transport.peripheralID == tx.binding.peripheralID {
+                transport.disconnect()
+            }
+        }
         var stage = "核实服务器账单"
         do {
             let checkedBill = needsBillCheck(tx)
@@ -281,7 +285,12 @@ import Foundation
                 try completeIdle(&tx)
                 return
             }
+            if tx.phase == .uploadUnknown, tx.usageState == .settlementPending, tx.billConfirmed != true {
+                // An ambiguous charge cannot be resolved by inspecting a previously closed meter.
+                throw WaterError.invalid("服务器结算结果待核实，请稍后再次查询账单")
+            }
             if tx.isSettlementRecovery {
+                stage = "核对本地订单"
                 guard !hasNewerUsage(than: tx) else { throw WaterError.reconciliation }
                 guard transport.isAvailableForRecovery(tx.binding.peripheralID) else {
                     stage = "等待原水表"
@@ -337,7 +346,9 @@ import Foundation
             stage = "恢复结算"
             tx.lastError = nil
             if state.state == 0, !closedOnThisConnection, !checkedBill, needsBillCheck(tx) {
+                stage = "核实服务器账单"
                 try await checkBill(&tx, session: session, trace: trace)
+                stage = "恢复结算"
             }
             try await settleClosed(&tx, state: state, session: session, trace: trace, freshClose: closedOnThisConnection)
         } catch {
@@ -393,9 +404,15 @@ import Foundation
         }
         if !freshClose, tx.receipt != nil {
             trace?.mark("verify_writeback_record")
-            let current = try await transport.exchange(0x85, payload: Data([0]))
-            guard current == tx.consumption, WaterProtocolIdentity.validConsumption(current) else {
-                throw WaterError.reconciliation
+            do {
+                let current = try await transport.exchange(0x85, payload: Data([0]))
+                guard current == tx.consumption, WaterProtocolIdentity.validConsumption(current) else {
+                    throw WaterError.reconciliation
+                }
+            } catch {
+                tx.lastError = "清账前核对水表消费数据（0x85）：\(error.localizedDescription)"
+                try save(tx)
+                throw error
             }
         }
         try await settle(&tx, state: state, session: session, trace: trace)

@@ -17,6 +17,7 @@ import SwiftUI
         OriginalDeviceDetailContent(device: device, isActive: active, busy: model.isBusy,
                                     availability: model.selectedDeviceAvailability,
                                     recovery: active ? nil : bluetoothRecovery?.usageState,
+                                    settlementRecovery: bluetoothRecovery?.isSettlementRecovery == true,
                                     bluetooth: Binding(get: { model.usesBluetooth(device) }, set: { model.setBluetooth($0, device: device) }), onConfirm: {
             if let bluetoothOrder { model.showShower = bluetoothOrder.id; onDismiss() }
             else if let cloudOrder { model.showCloudShower = cloudOrder.snCode; onDismiss() }
@@ -33,6 +34,7 @@ struct OriginalDeviceDetailContent: View {
     var busy = false
     var availability: OriginalDeviceAvailability = .idle
     var recovery: WaterUsageState? = nil
+    var settlementRecovery = false
     var bluetooth: Binding<Bool>? = nil
     let onConfirm: () -> Void
     let onDismiss: () -> Void
@@ -41,7 +43,7 @@ struct OriginalDeviceDetailContent: View {
     private var canUse: Bool { (isActive || recovery != nil || (availability != .occupied && availability != .running)) && !busy }
     private var buttonTitle: String {
         if isActive { return "恢复使用" }
-        if bluetoothRecovery?.isSettlementRecovery == true { return "继续核实结算" }
+        if settlementRecovery || recovery == .settlementPending { return "继续核实结算" }
         if recovery == .unconfirmed { return "核实状态" }
         if availability == .occupied { return "他人使用中" }
         if availability == .running { return "设备使用中" }
