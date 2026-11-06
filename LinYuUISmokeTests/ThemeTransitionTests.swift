@@ -32,6 +32,7 @@ final class ThemeTransitionTests: XCTestCase {
             for tab in 0..<3 {
                 let navigation = app.buttons["linyu.tab.\(tab)"]
                 XCTAssertTrue(navigation.exists)
+                guard ready(navigation, in: app) else { return }
                 XCTAssertTrue(navigation.isHittable)
                 XCTAssertTrue(app.frame.contains(navigation.frame))
                 navigation.tap()
@@ -45,6 +46,21 @@ final class ThemeTransitionTests: XCTestCase {
             XCTAssertEqual(toggle.value as? String, expected)
         }
         XCTAssertEqual(toggle.value as? String, initial)
+    }
+
+    @MainActor private func ready(_ control: XCUIElement, in app: XCUIApplication) -> Bool {
+        // Page changes animate the pill label and matched-geometry selection. A snapshot
+        // immediately after the previous tap can land inside that transition.
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == true AND enabled == true AND hittable == true"), object: control)
+        guard XCTWaiter.wait(for: [expectation], timeout: 5) == .completed else {
+            capture(app, "theme-navigation-not-ready")
+            let hierarchy = XCTAttachment(string: app.debugDescription)
+            hierarchy.name = "theme-navigation-not-ready-hierarchy"; hierarchy.lifetime = .keepAlways; add(hierarchy)
+            XCTFail("The navigation must become hittable after the page transition: \(control)")
+            return false
+        }
+        return true
     }
 
     @MainActor private func capture(_ app: XCUIApplication, _ name: String) {
