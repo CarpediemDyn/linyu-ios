@@ -45,6 +45,14 @@ struct DiscoveredWaterMeter: Identifiable, Equatable {
     private var scanTrace: LatencyTrace?
     private var connectionOperation: UUID?
     private var diagnosticTask: Task<Void, Never>?
+    private var displayIdentityTask: Task<WaterMeterIdentity, Error>?
+    private var displayIdentityToken: UUID?
+    private(set) var scanID = UUID()
+
+    var allowsAutomaticIdentification: Bool {
+        central.state == .poweredOn && (displayIdentityTask != nil
+            || (connected == nil && connectionOperation == nil && commandWait == nil && diagnosticTask == nil))
+    }
 
     private struct ConnectionWait {
         let token: UUID
@@ -81,7 +89,7 @@ struct DiscoveredWaterMeter: Identifiable, Equatable {
     }
 
     private var busy: Bool {
-        connectionOperation != nil || commandWait != nil || diagnosticTask != nil
+        connectionOperation != nil || commandWait != nil || diagnosticTask != nil || displayIdentityTask != nil
     }
 
     func startScan() {
@@ -91,6 +99,7 @@ struct DiscoveredWaterMeter: Identifiable, Equatable {
             bluetoothStatus = "请开启蓝牙并允许应用访问"
             return
         }
+        scanID = UUID()
         meters = []
         // Some meters omit FF00 from their advertising packet.
         central.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
@@ -161,11 +170,48 @@ struct DiscoveredWaterMeter: Identifiable, Equatable {
         return meters.contains { $0.id == id && Date().timeIntervalSince($0.lastSeen) <= 45 }
     }
 
+    /// Owns a disposable read-only connection. It never uses or replaces a user connection.
+    func readIdentityForDisplay(to id: UUID) async throws -> WaterMeterIdentity {
+        try Task.checkCancellation()
+        guard displayIdentityTask == nil, !busy, connected == nil else { throw WaterError.busy }
+        let token = UUID()
+        displayIdentityToken = token
+        let task = Task<WaterMeterIdentity, Error> { @MainActor [weak self] in
+            guard let self else { throw CancellationError() }
+            defer {
+                if self.displayIdentityToken == token {
+                    if self.connected?.identifier == id { self.retireSession(error: WaterError.disconnected) }
+                    self.displayIdentityTask = nil
+                    self.displayIdentityToken = nil
+                }
+            }
+            try await self.prepareConnection(to: id, forceReconnect: false)
+            let connection = self.connectionID
+            let payload = try await self.exchange(0x23, payload: BleDeviceState.queryPayload)
+            try Task.checkCancellation()
+            guard self.peripheralID == id, self.connectionID == connection else { throw WaterError.disconnected }
+            guard let identity = WaterProtocolIdentity.state(payload) else { throw WaterError.unsupportedIdentity }
+            return identity
+        }
+        displayIdentityTask = task
+        return try await withTaskCancellationHandler(operation: {
+            try await task.value
+        }, onCancel: { task.cancel() })
+    }
+
+    func cancelDisplayIdentification() async {
+        guard let task = displayIdentityTask else { return }
+        task.cancel()
+        _ = try? await task.value
+    }
+
     func connectForTransaction(to id: UUID) async throws {
+        await cancelDisplayIdentification()
         try await prepareConnection(to: id, forceReconnect: false)
     }
 
     func reconnectForTransaction(to id: UUID) async throws {
+        await cancelDisplayIdentification()
         try await prepareConnection(to: id, forceReconnect: true)
     }
 

@@ -151,6 +151,14 @@ struct CampusDevice: Codable, Equatable, Identifiable {
     }
     var emoji: String { isDrinkingWater ? (isHotWater ? "♨️" : "❄️") : deviceName.hasPrefix("洗手台") ? "🪥" : "🚿" }
     var statusText: String { isDrinkingWater ? (isHotWater ? "正在接热水" : "正在接凉水") : deviceName.hasPrefix("洗手台") ? "正在洗漱中" : "正在沐浴中" }
+    /// Display metadata must route to the same observed MAC, including the upstream derived form.
+    func matchesObservedMAC(_ address: String) -> Bool {
+        guard let ledger = try? ledgerDevice else { return false }
+        let observed = Set(OriginalFormatting.macLookupVariants(address).compactMap(LedgerDevice.normalizeMAC))
+        let expected = Set(OriginalFormatting.macLookupVariants(ledger.apiMAC).compactMap(LedgerDevice.normalizeMAC))
+        return !observed.isDisjoint(with: expected)
+    }
+
     var ledgerDevice: LedgerDevice {
         get throws {
             guard let deviceId = OriginalJSON.nonempty(deviceId), let snCode = OriginalJSON.nonempty(snCode),
@@ -224,6 +232,7 @@ struct CampusMeterDisplayCache {
     private struct Entry: Codable {
         let device: CampusDevice
         let verifiedAt: Date
+        var observedMAC: String? = nil
     }
 
     private let defaults: UserDefaults
@@ -239,12 +248,18 @@ struct CampusMeterDisplayCache {
 
     func device(for id: UUID, now: Date = Date()) -> CampusDevice? {
         guard let entry = entries[id], (0...86_400).contains(now.timeIntervalSince(entry.verifiedAt)) else { return nil }
+        if let observed = entry.observedMAC, !entry.device.matchesObservedMAC(observed) { return nil }
         return entry.device
     }
 
-    mutating func store(_ device: CampusDevice, for id: UUID, now: Date = Date()) {
+    mutating func store(_ device: CampusDevice, for id: UUID, now: Date = Date(), observedMAC: String? = nil) {
+        if let observedMAC, !device.matchesObservedMAC(observedMAC) {
+            entries.removeValue(forKey: id)
+            if let data = try? JSONEncoder().encode(entries) { defaults.set(data, forKey: key) }
+            return
+        }
         entries = entries.filter { (0...86_400).contains(now.timeIntervalSince($0.value.verifiedAt)) }
-        entries[id] = Entry(device: device, verifiedAt: now)
+        entries[id] = Entry(device: device, verifiedAt: now, observedMAC: observedMAC)
         if entries.count > 64, let oldest = entries.min(by: { $0.value.verifiedAt < $1.value.verifiedAt })?.key {
             entries.removeValue(forKey: oldest)
         }

@@ -41,7 +41,8 @@ import UIKit
                     Button { Task { await model.choose(meter) } } label: {
                         OriginalNearbyDeviceRow(name: device?.displayName ?? OriginalFormatting.deviceName(meter.name),
                                                 emoji: device?.emoji ?? "🚿", rssi: meter.rssi,
-                                                address: device?.macAddress ?? meter.id.uuidString)
+                                                address: device?.macAddress ?? meter.id.uuidString,
+                                                nameStatus: model.nearbyNameStatus(for: meter.id))
                     }.buttonStyle(LinYuPressStyle()).disabled(model.isBusy)
                 }
                 if model.isBusy {
@@ -53,7 +54,8 @@ import UIKit
             .frame(maxWidth: 680).frame(maxWidth: .infinity)
         }.refreshable { await refresh() }
             .onAppear { model.homeAppeared() }
-            .task { if CBCentralManager.authorization == .allowedAlways { model.ble.startScan() } }
+            .onDisappear { model.homeDisappeared() }
+            .task { if CBCentralManager.authorization == .allowedAlways { await model.scanNearbyMeters() } }
             .accessibilityIdentifier("linyu.home")
     }
     private var header: some View {
@@ -134,7 +136,7 @@ import UIKit
                 Button {
                     if CBCentralManager.authorization == .denied || CBCentralManager.authorization == .restricted {
                         if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
-                    } else { model.ble.startScan() }
+                    } else { Task { await model.scanNearbyMeters() } }
                 } label: { Text("授予权限并扫描").frame(maxWidth: .infinity) }
                     .buttonStyle(LinYuButtonStyle(cornerRadius: 12)).padding(.top, 12)
                 Text("也可以直接用右上角 📷 扫码绑定设备，无需蓝牙权限")
@@ -142,7 +144,7 @@ import UIKit
             }
         }
     }
-    private func refresh() async { model.ble.startScan(); await model.refresh() }
+    private func refresh() async { await model.scanNearbyMeters(); await model.refresh() }
 }
 
 private struct OriginalSignalLegend: View {
@@ -207,6 +209,7 @@ struct OriginalNearbyDeviceRow: View {
     let emoji: String
     let rssi: Int
     let address: String
+    var nameStatus: String? = nil
     private var signalColor: Color { rssi >= -70 ? colors.success : rssi >= -85 ? colors.warning : colors.danger }
     var body: some View {
         OriginalGlassCard(padding: 16) {
@@ -215,6 +218,9 @@ struct OriginalNearbyDeviceRow: View {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(name).font(LinYuType.font(16, weight: .semibold)).foregroundStyle(colors.textPrimary).multilineTextAlignment(.leading)
                     Text("信号强度: \(rssi) dBm").font(LinYuType.font(13)).foregroundStyle(signalColor).padding(.top, 6)
+                    if let nameStatus {
+                        Text(nameStatus).font(LinYuType.font(12)).foregroundStyle(colors.textSecondary).padding(.top, 4)
+                    }
                     Text(address).font(LinYuType.font(12)).foregroundStyle(colors.textSecondary).padding(.top, 2).lineLimit(1).truncationMode(.head)
                 }.frame(maxWidth: .infinity, alignment: .leading)
                 LinYuIcon(name: "keyboard_arrow_right").foregroundStyle(colors.textSecondary)

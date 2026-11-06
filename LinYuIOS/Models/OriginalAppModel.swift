@@ -53,6 +53,23 @@ import WidgetKit
     private var refreshAgain = false
     private var deviceLookup = CampusDeviceLookup(ownerScope: "")
     private var meterDisplay: CampusMeterDisplayCache?
+    private var nearbyPageVisible = false
+    private lazy var nameResolver = NearbyMeterNameResolver(
+        readIdentity: { [weak self] id in
+            guard let self else { throw CancellationError() }
+            return try await self.ble.readIdentityForDisplay(to: id)
+        }, loadDevice: { [weak self] mac in
+            guard let self, let session = self.auth.session else { throw CancellationError() }
+            let token = self.generation
+            let device = try await self.cachedDevice(mac, session: session)
+            guard self.generation == token else { throw CancellationError() }
+            return device
+        }, onResolved: { [weak self] id, device, observedMAC in
+            guard let self else { return }
+            self.meterDisplay?.store(device, for: id, observedMAC: observedMAC)
+            self.nearby[id] = device
+        }, trace: { [weak self] in self?.logs.trace("ble_name") ?? LatencyTrace("ble_name", report: { _ in }) }
+    )
     private var needsHomeHydration = false
     private var showerTrace: LatencyTrace?
     private var lastWidgetPayload: Data?
@@ -69,16 +86,18 @@ import WidgetKit
                           preferences.objectWillChange.eraseToAnyPublisher()] {
             publisher.sink { [weak self] _ in
                 self?.objectWillChange.send()
-                DispatchQueue.main.async { [weak self] in self?.publishSnapshot() }
+                DispatchQueue.main.async { [weak self] in
+                    self?.publishSnapshot()
+                    self?.updateNearbyNames()
+                }
             }.store(in: &subscriptions)
         }
-        ble.$meters.sink { [weak self] meters in
-            guard let self else { return }
-            let display = Dictionary(uniqueKeysWithValues: meters.compactMap { meter in
-                self.meterDisplay?.device(for: meter.id).map { (meter.id, $0) }
-            })
-            if self.nearby != display { self.nearby = display }
-        }.store(in: &subscriptions)
+        nameResolver.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &subscriptions)
+        Publishers.CombineLatest4($selectedDevice, $showShower, $showCloudShower, $working)
+            .sink { [weak self] _ in
+                DispatchQueue.main.async { [weak self] in self?.updateNearbyNames() }
+            }.store(in: &subscriptions)
         auth.$session.dropFirst().sink { [weak self] value in self?.accountChanged(value) }.store(in: &subscriptions)
         OriginalNotifications.shared.onAction = { [weak self] url in Task { await self?.handle(url) } }
         accountChanged(auth.session)
@@ -104,6 +123,7 @@ import WidgetKit
 
     private func cacheKey(_ suffix: String, _ session: QzxySession) -> String { "replica.\(session.ownerScope).\(suffix)" }
     private func accountChanged(_ session: QzxySession?) {
+        nameResolver.reset()
         generation = UUID(); heartbeat?.cancel(); cloud.stopMonitoring()
         refreshing = false
         refreshAgain = false; unpaidRevision &+= 1
@@ -120,6 +140,7 @@ import WidgetKit
         account = nil; balance = nil; bills = []; unpaid = []; nearby = [:]
         selectedDevice = nil; selectedPeripheral = nil; codeCandidate = nil; candidateCreatedAt = nil; showShower = nil; showCloudShower = nil
         guard let session else { publishSnapshot(); return }
+        meterDisplay = CampusMeterDisplayCache(ownerScope: session.ownerScope)
         account = CampusAccountCache(ownerScope: session.ownerScope)
         balance = CampusBalanceSnapshot(ownerScope: session.ownerScope)
         needsHomeHydration = true
@@ -128,8 +149,46 @@ import WidgetKit
     }
 
     func homeAppeared() {
+        nearbyPageVisible = true
+        updateNearbyNames()
         auth.homeAppeared()
         if let session = auth.session { scheduleHomeHydration(session: session) }
+    }
+
+    func homeDisappeared() {
+        nearbyPageVisible = false
+        nameResolver.pause()
+    }
+
+    private func updateNearbyNames() {
+        guard let session = auth.session, !session.loginCode.isEmpty else { return }
+        let display = Dictionary(uniqueKeysWithValues: ble.meters.compactMap { meter in
+            meterDisplay?.device(for: meter.id).map { (meter.id, $0) }
+        })
+        if nearby != display { nearby = display }
+        let enabled = foreground && nearbyPageVisible && !ble.scanning && !isBusy
+            && ble.allowsAutomaticIdentification && activeBluetooth.isEmpty && unconfirmedBluetooth.isEmpty
+            && selectedDevice == nil && showShower == nil && showCloudShower == nil
+        nameResolver.update(ble.meters, scanID: ble.scanID, cachedIDs: Set(display.keys), enabled: enabled)
+    }
+
+    func nearbyNameStatus(for id: UUID) -> String? {
+        guard nearby[id] == nil else { return nil }
+        return nameResolver.states[id] == .identifying ? "正在识别名称…" : "名称待识别，点击识别"
+    }
+
+    private func pauseNearbyIdentification() async {
+        nameResolver.pause()
+        // Wait only for the owned BLE read to retire; a shared read-only HTTP lookup
+        // may finish independently and can be reused by the manual identification.
+        await ble.cancelDisplayIdentification()
+    }
+
+    func scanNearbyMeters() async {
+        guard !isBusy else { return }
+        await pauseNearbyIdentification()
+        guard !isBusy, foreground, nearbyPageVisible else { return }
+        ble.startScan()
     }
 
     func showerAppeared() {
@@ -230,7 +289,11 @@ import WidgetKit
 
     func setForeground(_ value: Bool) {
         foreground = value
-        if value { startForeground() } else { heartbeat?.cancel(); heartbeat = nil; cloud.stopMonitoring() }
+        if value { startForeground() } else {
+            nameResolver.pause()
+            heartbeat?.cancel(); heartbeat = nil; cloud.stopMonitoring()
+        }
+        updateNearbyNames()
     }
     private func startForeground() {
         heartbeat?.cancel(); guard let session = auth.session else { return }
@@ -253,19 +316,23 @@ import WidgetKit
 
     func choose(_ meter: DiscoveredWaterMeter, showDetail: Bool = true) async {
         guard let session = auth.session, !isBusy else { return }
+        working = true
+        let token = generation
         let trace = logs.trace("ble_identify")
+        var result = "failed"
+        defer { working = false; trace.finish(result); updateNearbyNames() }
         trace.mark("tap")
+        await pauseNearbyIdentification()
+        guard generation == token else { return }
         if let discovered = ble.meters.first(where: { $0.id == meter.id }) {
             trace.mark("seen_to_tap_\(max(0, Int(Date().timeIntervalSince(discovered.lastSeen) * 1_000)))ms")
         }
         if let cached = meterDisplay?.device(for: meter.id) {
             setBluetooth(true, device: cached)
             display(cached, peripheral: meter.id, availability: .unknown, showDetail: showDetail)
-            trace.finish("display_cache_hit")
+            result = "display_cache_hit"
             return
         }
-        var result = "failed"
-        working = true; let token = generation; defer { working = false; trace.finish(result) }
         do {
             trace.mark("connecting")
             try await ble.connectForTransaction(to: meter.id)
@@ -284,7 +351,7 @@ import WidgetKit
                 return
             }
             trace.mark("binding_saved")
-            meterDisplay?.store(device, for: meter.id)
+            meterDisplay?.store(device, for: meter.id, observedMAC: proof.identity.macAddress)
             setBluetooth(true, device: device)
             display(device, peripheral: meter.id, availability: OriginalDeviceAvailability(bleState: proof.state), showDetail: showDetail)
             result = "detail_ready"
@@ -304,6 +371,8 @@ import WidgetKit
     func scanCode(_ sn: String) async {
         guard let session = auth.session, !isBusy else { return }
         working = true; let token = generation; defer { working = false }
+        await pauseNearbyIdentification()
+        guard generation == token else { return }
         do {
             guard let device = try await cachedDevice(sn, session: session) else { throw WaterError.invalid("没有查到二维码对应的设备") }
             guard generation == token else { return }
@@ -350,7 +419,7 @@ import WidgetKit
                 guard let ledger = try await cachedDevice(proof.identity.macAddress, session: session),
                       generation == token, ledger.deviceId == device.deviceId, ledger.snCode == device.snCode else { continue }
                 if let binding = await transactions.associate(device: try ledger.ledgerDevice, session: session, observation: proof) {
-                    meterDisplay?.store(ledger, for: id)
+                    meterDisplay?.store(ledger, for: id, observedMAC: proof.identity.macAddress)
                     nearby[id] = ledger
                     return binding
                 }
@@ -383,6 +452,8 @@ import WidgetKit
             if result != "shower_ready" { trace.finish(result) }
             publishSnapshot()
         }
+        await pauseNearbyIdentification()
+        guard generation == token else { return }
         do {
             if bluetooth {
                 let binding = try await locate(device, session: session, peripheral: peripheral)
@@ -424,6 +495,7 @@ import WidgetKit
         guard let session = auth.session, !isBusy,
               let current = bluetoothTransactions.first(where: { $0.id == record.id }) else { return }
         let isRecovery = current.isSettlementRecovery
+        let operationGeneration = generation
         let trace = logs.trace(isRecovery ? "ble_settlement_recovery" : "ble_close")
         trace.mark("confirmed_tap")
         trace.onStage = { [weak self] stage in
@@ -454,6 +526,8 @@ import WidgetKit
             settlingBluetooth = nil; bluetoothSettlementProgress = nil
             unconfirmedBluetoothClose = nil; working = false; publishSnapshot()
         }
+        await pauseNearbyIdentification()
+        guard generation == operationGeneration else { return }
         if transactions.storageBlocked, isRecovery {
             message = WaterError.storage.localizedDescription
             trace.finish("settlement_pending")
