@@ -1,8 +1,13 @@
 name: Build LiveContainer IPA
-run-name: ${{ inputs.preflight_only && 'Release preflight (no IPA)' || inputs.tests_only && 'iOS regression tests (no IPA)' || 'Build LiveContainer IPA' }}
+run-name: ${{ inputs.inspect_run != '' && 'Inspect XCTest diagnostics (no build)' || inputs.preflight_only && 'Release preflight (no IPA)' || inputs.tests_only && 'iOS regression tests (no IPA)' || 'Build LiveContainer IPA' }}
 on:
   workflow_dispatch:
     inputs:
+      inspect_run:
+        description: Optional completed run ID; inspect its XCTest only, without compiling or packaging
+        type: string
+        required: false
+        default: ''
       tests_only:
         description: Run all iOS tests without a device build, signing or IPA
         type: boolean
@@ -36,6 +41,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   wait_for_service:
+    if: ${{ inputs.inspect_run == '' }}
     name: Wait for GitHub Actions recovery
     runs-on: ubuntu-latest
     timeout-minutes: 50
@@ -81,7 +87,7 @@ jobs:
           swift --version
           swift test
   build:
-    if: ${{ !inputs.preflight_only }}
+    if: ${{ !inputs.preflight_only && inputs.inspect_run == '' }}
     needs: [wait_for_service, preflight]
     runs-on: ${{ inputs.runner || 'macos-26-intel' }}
     timeout-minutes: 35
@@ -103,17 +109,28 @@ jobs:
       - name: Generate container project
         run: xcodegen generate --spec project-livecontainer.yml
       - name: Select simulator
+        timeout-minutes: 6
         env:
           LINYU_SIMULATOR_FAMILY: ${{ inputs.simulator }}
         run: |
           SIMULATOR_ID=$(xcrun simctl list devices available -j | python3 -c 'import json,os,sys; data=json.load(sys.stdin); print(next(d["udid"] for runtime,devices in data["devices"].items() if "SimRuntime.iOS-" in runtime for d in devices if d["name"].startswith(os.environ.get("LINYU_SIMULATOR_FAMILY") or "iPhone") and d.get("isAvailable", False)))')
+          xcrun simctl bootstatus "$SIMULATOR_ID" -b
           echo "IOS_SIMULATOR_UDID=$SIMULATOR_ID" >> "$GITHUB_ENV"
       - name: Compile and run iOS tests
         run: |
+          set -o pipefail
+          mkdir -p work
           xcodebuild -project LinYuLiveContainer.xcodeproj -scheme LinYuIOS \
             -configuration Debug -sdk iphonesimulator -destination "id=$IOS_SIMULATOR_UDID" \
             -derivedDataPath work/SimulatorBuild -resultBundlePath work/ContainerTests.xcresult \
-            CODE_SIGNING_ALLOWED=NO test
+            CODE_SIGNING_ALLOWED=NO test 2>&1 | tee work/xcodebuild-test.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: LinYu-iOS-Test-Console
+          path: work/xcodebuild-test.log
+          if-no-files-found: warn
+          retention-days: 7
       - name: Export screenshots from XCTest
         if: always()
         run: |
@@ -154,5 +171,54 @@ jobs:
           name: LinYu-LiveContainer-XCTest
           path: work/ContainerTests.xcresult
           if-no-files-found: ignore
+          retention-days: 7
+
+  inspect:
+    name: Inspect existing XCTest (no compilation or IPA)
+    if: ${{ inputs.inspect_run != '' }}
+    runs-on: ${{ inputs.runner || 'macos-26' }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read the existing result bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.inspect_run }}
+          EXPECTED_SOURCE_SHA: ${{ inputs.expected_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+          python3 - <<'PY'
+          import os, re
+          assert re.fullmatch(r'[0-9]{1,20}', os.environ['SOURCE_RUN_ID'])
+          PY
+          mkdir -p work/inspection
+          gh run view "$SOURCE_RUN_ID" --repo "$GITHUB_REPOSITORY" --json headSha,status,conclusion > work/inspection/source-run.json
+          cat work/inspection/source-run.json
+          gh run download "$SOURCE_RUN_ID" --repo "$GITHUB_REPOSITORY" --name LinYu-LiveContainer-XCTest --dir work/inspected.xcresult
+          python3 - <<'PY'
+          import json, pathlib, subprocess
+          output = pathlib.Path('work/inspection')
+          commands = {
+              'summary': ['get', 'test-results', 'summary'],
+              'tests': ['get', 'test-results', 'tests'],
+              'build-log': ['get', 'log', '--type', 'build'],
+              'console-log': ['get', 'log', '--type', 'console'],
+              'legacy-root': ['get', '--legacy', '--format', 'json'],
+          }
+          for name, args in commands.items():
+              result = subprocess.run(['xcrun', 'xcresulttool', *args, '--path', 'work/inspected.xcresult'], capture_output=True)
+              (output / (name + '.txt')).write_bytes(result.stdout + b'\n' + result.stderr)
+              print(json.dumps({'diagnostic': name, 'exit_code': result.returncode, 'bytes': len(result.stdout)}), flush=True)
+              if name == 'summary': print(result.stdout.decode('utf-8', errors='replace')[:12000], flush=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: LinYu-XCTest-Inspection
+          path: work/inspection
+          if-no-files-found: error
           retention-days: 7
 
