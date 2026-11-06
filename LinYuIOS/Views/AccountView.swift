@@ -4,6 +4,7 @@ import SwiftUI
 @MainActor struct AccountView: View {
     @ObservedObject var auth: AuthManager
     @ScaledMetric(relativeTo: .headline) private var submitFont: CGFloat = 17
+    @FocusState private var focusedField: OriginalLoginFieldKind?
     @State private var phone = ""
     @State private var password = ""
     @State private var smsCode = ""
@@ -44,7 +45,22 @@ import SwiftUI
                     .scaleEffect(appeared ? 1 : 0.8, anchor: .top)
                     .frame(minHeight: geometry.size.height,
                            alignment: window.size.width >= 600 && !window.short ? .center : .top)
-                }.scrollDismissesKeyboard(.interactively)
+                }
+                .scrollDismissesKeyboard(window.short ? .immediately : .interactively)
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    if focusedField != nil && (window.short || geometry.size.width > geometry.size.height) {
+                        HStack {
+                            Spacer()
+                            Button { focusedField = nil } label: {
+                                Text("收起键盘").font(LinYuType.font(14, weight: .medium))
+                                    .frame(minHeight: 44).padding(.horizontal, 12)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain).foregroundStyle(.white)
+                        }
+                        .background(blue)
+                    }
+                }
             }
         }.preferredColorScheme(.light)
             .onAppear { withAnimation(.easeInOut(duration: 0.4)) { appeared = true } }
@@ -61,13 +77,13 @@ import SwiftUI
             }.font(LinYuType.font(13)).foregroundStyle(blue).frame(minHeight: 44).padding(.bottom, compact ? 4 : 16).disabled(loggingIn)
             Text(usePassword ? "未设置密码？请使用手机号验证码登录" : "未注册的手机号将自动创建账号")
                 .font(LinYuType.font(12)).foregroundStyle(.gray).frame(minHeight: 24).padding(.bottom, compact ? 6 : 12)
-            OriginalLoginField(title: "手机号", text: $phone, icon: "phone", kind: .phone)
+            OriginalLoginField(title: "手机号", text: $phone, icon: "phone", kind: .phone, focus: $focusedField)
             Group {
                 if usePassword {
-                    OriginalLoginField(title: "密码", text: $password, icon: "lock", kind: .password)
+                    OriginalLoginField(title: "密码", text: $password, icon: "lock", kind: .password, focus: $focusedField)
                 } else {
                     HStack(spacing: 12) {
-                        OriginalLoginField(title: "验证码", text: $smsCode, kind: .code)
+                        OriginalLoginField(title: "验证码", text: $smsCode, kind: .code, focus: $focusedField)
                         Button(action: sendCode) { Text(countdown > 0 ? "\(countdown)s" : "发送").font(LinYuType.font(13)).lineLimit(1).frame(width: compact ? 66 : 84, height: 44) }
                             .foregroundStyle(.white).background(sending || countdown > 0 ? Color(linYuHex: 0x90CAF9) : blue, in: RoundedRectangle(cornerRadius: 14))
                             .buttonStyle(.plain).disabled(!canSubmitLogin || countdown > 0)
@@ -183,13 +199,14 @@ private struct LoginSubmitButtonStyle: ButtonStyle {
     }
 }
 
-private enum OriginalLoginFieldKind { case phone, password, code }
+private enum OriginalLoginFieldKind: Hashable { case phone, password, code }
 private struct OriginalLoginField: View {
     let title: String
     @Binding var text: String
     var icon: String? = nil
     let kind: OriginalLoginFieldKind
-    @FocusState private var focused: Bool
+    let focus: FocusState<OriginalLoginFieldKind?>.Binding
+    private var focused: Bool { focus.wrappedValue == kind }
     private let blue = Color(linYuHex: 0x1A73E8)
     private var raised: Bool { focused || !text.isEmpty }
     var body: some View {
@@ -199,7 +216,7 @@ private struct OriginalLoginField: View {
                 if kind == .password { SecureField("", text: $text).textContentType(.password) }
                 else { TextField("", text: $text).keyboardType(kind == .phone ? .phonePad : .numberPad).textContentType(kind == .phone ? .username : .oneTimeCode) }
             }.font(LinYuType.font(16)).foregroundStyle(Color(linYuHex: 0x1A1A1A)).tint(blue)
-                .focused($focused).textInputAutocapitalization(.never).autocorrectionDisabled().accessibilityLabel(title)
+                .focused(focus, equals: kind).textInputAutocapitalization(.never).autocorrectionDisabled().accessibilityLabel(title)
             if kind != .code && !text.isEmpty {
                 Button { text = "" } label: { Text("✕").foregroundStyle(.gray).frame(width: 44, height: 44) }.buttonStyle(.plain).accessibilityLabel("清空" + title)
             }

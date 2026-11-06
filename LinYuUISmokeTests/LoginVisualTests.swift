@@ -3,6 +3,7 @@ import XCTest
 /// Exercises the real login UI without using any account or calling the API.
 final class LoginVisualTests: XCTestCase {
     @MainActor func testLoginModesAndInvalidPhone() {
+        XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
         app.launch()
         let mode = app.buttons["密码登录"]
@@ -42,10 +43,21 @@ final class LoginVisualTests: XCTestCase {
         phone.tap()
         phone.typeText("12")
         device.orientation = .landscapeLeft
+        let dismissKeyboard = app.buttons["收起键盘"]
+        if dismissKeyboard.waitForExistence(timeout: 4) {
+            let keyboard = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            keyboard.name = "responsive-keyboard-dismiss"
+            keyboard.lifetime = .keepAlways
+            add(keyboard)
+            dismissKeyboard.tap()
+        }
         let login = app.buttons["登 录"]
         let form = app.scrollViews.firstMatch
         XCTAssertTrue(form.waitForExistence(timeout: 5))
-        if !login.isHittable { form.swipeUp() }
+        for _ in 0..<3 {
+            if login.isHittable { break }
+            form.swipeUp()
+        }
         XCTAssertEqual(phone.value as? String, "12")
         XCTAssertTrue(login.exists)
         login.tap()
@@ -113,6 +125,7 @@ final class LoginVisualTests: XCTestCase {
     }
 
     @MainActor private func launchFixture(_ scenario: String) -> XCUIApplication {
+        XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
         app.launchEnvironment["LINYU_LOGIN_FIXTURE"] = scenario
         app.launch()
