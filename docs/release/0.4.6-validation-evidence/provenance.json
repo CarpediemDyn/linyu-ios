@@ -19,5 +19,12 @@
     "run_id": 42173058772,
     "sha256": "d861d61f682d2633668f0e1e14ebb3e25d0fc2c740c8a051bc923b059e01ca7f",
     "processing": "Actual Mock screenshots/recorded frames, scaled and arranged; no interpolated frames"
+  },
+  {
+    "file": "iphone-navigation-failure.png",
+    "source_commit": "6de07d1346d1ba4a96b3f59cd2d49861f818021e",
+    "run_id": 42221696891,
+    "sha256": "b960c3237320f02daa67d44c3c99d2f498888546252e121aed64a9f1ef9efd1a",
+    "processing": "Original failure screenshot, unchanged; simulator Mock account"
   }
 ]

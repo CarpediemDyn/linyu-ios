@@ -36,7 +36,7 @@ BLE 连接、开关阀和设备清账需要靠近原水表。上传结果未知�
 
 v0.4.5 构建通过 43 项核心测试、125 项 iOS 测试（包含这 43 项核心测试）、7 项 UI 测试和 8 项打包测试。测试使用 Mock 网络和 BLE；这些是旧版结果，不能算作 v0.4.6 已通过。历史异常交易的真实账单及设备写回仍需原 iPhone 验证。 [成功构建记录](https://github.com/CarpediemDyn/linyu-ios/actions/runs/42154843612) · [v0.4.5 验证报告](https://github.com/CarpediemDyn/linyu-ios/blob/fix/ble-settlement-recovery/docs/ble-settlement-recovery-v0.4.5.md) · [v0.4.6 发布前检查](docs/release/0.4.6-readiness.md)
 
-v0.4.6 的固定源码 `f343494` 在 Ubuntu/macOS 通过 51 项核心测试、8 项打包测试，在 iOS 模拟器通过 177 项单元测试（含上述 51 项核心测试）；8 项 UI 测试中 5 项通过、3 项失败，因此没有执行真机包构建及签名。后续已运行 iPhone 和 iPad 测试：177 项单元测试持续通过，主题与历史恢复 UI 已通过；用户已调整为先发布 iPhone 测试版，iPad 暂不适配，密码模式触摸问题未解决并保留记录；正在进行 iPhone 完整验证，尚不生成 IPA 或发布。用户已授权继续验证及完成后的必要构建。最新证据见 [继续验证记录](docs/release/0.4.6-validation.md)。见 [实际质量检查报告](docs/release/0.4.6-quality-results.md) 与 [失败运行](https://github.com/CarpediemDyn/linyu-ios/actions/runs/42173058772)。
+v0.4.6 的固定源码 `f343494` 在 Ubuntu/macOS 通过 51 项核心测试、8 项打包测试，在 iOS 模拟器通过 177 项单元测试（含上述 51 项核心测试）；8 项 UI 测试中 5 项通过、3 项失败，因此没有执行真机包构建及签名。后续已运行 iPhone 和 iPad 测试：177 项单元测试持续通过，主题与历史恢复 UI 已通过；用户已调整为先发布 iPhone 测试版，iPad 暂不适配，密码模式触摸问题未解决并保留记录；iPhone 最新完整运行已通过 177 单元、6 登录及历史恢复 UI，主题导航的可点击断言仍失败，正在修正装饰层并重新验证；尚不生成 IPA 或发布。用户已授权继续验证及完成后的必要构建。最新证据见 [继续验证记录](docs/release/0.4.6-validation.md)。见 [实际质量检查报告](docs/release/0.4.6-quality-results.md) 与 [失败运行](https://github.com/CarpediemDyn/linyu-ios/actions/runs/42173058772)。
 
 ## 构建与安装
 

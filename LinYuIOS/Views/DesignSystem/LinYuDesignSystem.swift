@@ -255,13 +255,19 @@ struct LinYuPillNavigation: View {
             }
         }.padding(4).frame(maxWidth: 260)
             .fixedSize(horizontal: false, vertical: true)
-            .background(Color(linYuHex: colors.isDark ? 0x1A202C : 0xFFFFFF, alpha: Double(colors.isDark ? 184 : 216) / 255), in: RoundedRectangle(cornerRadius: 28))
-            .overlay {
+            .background {
+                // Compose draws the pill fill/border behind its clickable cells. Keep
+                // the entire decoration behind SwiftUI buttons too, including AX hits.
                 RoundedRectangle(cornerRadius: 28)
-                    .stroke(Color(linYuHex: colors.isDark ? 0xFFFFFF : 0x000000, alpha: Double(colors.isDark ? 40 : 24) / 255), lineWidth: 1)
-                    .allowsHitTesting(false).accessibilityHidden(true)
+                    .fill(Color(linYuHex: colors.isDark ? 0x1A202C : 0xFFFFFF, alpha: Double(colors.isDark ? 184 : 216) / 255))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 28)
+                            .stroke(Color(linYuHex: colors.isDark ? 0xFFFFFF : 0x000000, alpha: Double(colors.isDark ? 40 : 24) / 255), lineWidth: 1)
+                    }
+                    .shadow(color: .black.opacity(0.22), radius: 10, y: 7)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
             }
-            .shadow(color: .black.opacity(0.22), radius: 10, y: 7)
     }
 }
 
