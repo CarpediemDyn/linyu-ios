@@ -15,17 +15,23 @@ extension EnvironmentValues {
     }
 }
 
-/// Android CircularRevealThemeHost parity:
-/// keep the content mounted once; only the overlay advances every animation frame.
+/// Keeps the live page mounted once. Display-link ticks belong to the UIKit mask only.
 @MainActor struct LinYuThemeHost<Content: View>: View {
     @ObservedObject var preferences: OriginalPreferences
     @Environment(\.colorScheme) private var systemScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var reveal = LinYuThemeReveal()
-    @State private var displayDark = false
-    @State private var oldDark = false
-    @State private var targetDark = false
-    @State private var revealStart: Date?
+    @State private var displayDark: Bool
+    @State private var transition: Transition?
     private let content: Content
+
+    private struct Transition {
+        let id = UUID()
+        let oldDark: Bool
+        let targetDark: Bool
+        let origin: CGPoint
+    }
 
     init(preferences: OriginalPreferences, @ViewBuilder content: () -> Content) {
         self.preferences = preferences
@@ -40,118 +46,95 @@ extension EnvironmentValues {
     var body: some View {
         GeometryReader { geometry in
             let palette = LinYuPalette(isDark: displayDark, customAccent: preferences.homeThemeRGB)
-            ZStack {
-                // Cover the entire hosting view, including the home-indicator area.
-                // A preferredColorScheme change must not expose the UIKit default white.
-                palette.background.ignoresSafeArea()
-
-                content
-                    .environment(\.linYuColors, palette)
-                    .environment(\.linYuWindow, LinYuWindowLayout(size: geometry.size))
-                    .environment(\.linYuThemeReveal, reveal)
-                    .tint(palette.accent)
-
-                if let revealStart {
-                    // Unlike the previous implementation, TimelineView does not wrap
-                    // the live page hierarchy, navigation, Bluetooth views or dialogs.
-                    LinYuRevealAnimation(start: revealStart,
-                                         origin: reveal.origin,
-                                         oldBackground: LinYuPalette(isDark: oldDark).background)
-                        .ignoresSafeArea()
+            content
+                .environment(\.linYuColors, palette)
+                .environment(\.linYuWindow, LinYuWindowLayout(size: geometry.size))
+                .environment(\.linYuThemeReveal, reveal)
+                .environment(\.colorScheme, displayDark ? .dark : .light)
+                .tint(palette.accent)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background { palette.background.ignoresSafeArea(.container) }
+                .overlay {
+                    if let transition {
+                        GeometryReader { overlay in
+                            let offset = overlay.frame(in: .named("linyu.theme")).origin
+                            let origin = transition.origin == .zero ? CGPoint.zero
+                                : CGPoint(x: transition.origin.x - offset.x, y: transition.origin.y - offset.y)
+                            LinYuRevealDrawing(
+                                origin: origin,
+                                oldColor: UIColor(LinYuPalette(isDark: transition.oldDark).background),
+                                previewApplied: displayDark == transition.targetDark,
+                                onPreview: { applyPreview(id: transition.id) },
+                                onCompletion: { finish(id: transition.id) }
+                            )
+                        }
+                        .id(transition.id)
+                        .ignoresSafeArea(.container)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
+                        .transition(.identity)
+                    }
                 }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(palette.background.ignoresSafeArea())
-            .preferredColorScheme(preferences.theme == "system" ? nil : (displayDark ? .dark : .light))
+                .preferredColorScheme(preferences.theme == "system" ? nil : (displayDark ? .dark : .light))
+                .onChange(of: geometry.size) { _ in finishCurrent() }
         }
-        .background(LinYuPalette(isDark: displayDark).background.ignoresSafeArea())
         .coordinateSpace(name: "linyu.theme")
-        .onAppear { displayDark = requestedDark }
+        .onAppear { applyImmediately() }
         .onChange(of: preferences.theme) { _ in beginReveal() }
         .onChange(of: systemScheme) { _ in
-            if preferences.theme == "system", !reveal.isAnimating { displayDark = requestedDark }
+            if preferences.theme == "system" { applyImmediately() }
         }
-        .task(id: revealStart) {
-            guard let started = revealStart else { return }
-            do {
-                // Android switches the content at 20% of the eased circular reveal.
-                // This corresponds to about 152ms for its 650ms cubic-bezier curve.
-                try await Task.sleep(nanoseconds: 152_000_000)
-                guard revealStart == started else { return }
-                displayDark = targetDark
-                try await Task.sleep(nanoseconds: 498_000_000)
-                guard revealStart == started else { return }
-                revealStart = nil
-                reveal.isAnimating = false
-            } catch {
-                // A removed view must not complete an obsolete theme transition.
-                return
-            }
+        .onChange(of: reduceMotion) { reduced in if reduced { applyImmediately() } }
+        .onChange(of: scenePhase) { phase in if phase != .active { applyImmediately() } }
+        .onDisappear { applyImmediately() }
+    }
+
+    private func withoutAnimation(_ action: () -> Void) {
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction, action)
+    }
+
+    private func applyImmediately() {
+        withoutAnimation {
+            displayDark = requestedDark
+            transition = nil
+            reveal.isAnimating = false
+            reveal.origin = .zero
         }
     }
 
     private func beginReveal() {
-        guard !reveal.isAnimating, displayDark != requestedDark else { return }
-        oldDark = displayDark
-        targetDark = requestedDark
-        reveal.isAnimating = true
-        revealStart = .now
-    }
-}
-
-/// Runs only the drawing overlay at display cadence, never the application content.
-private struct LinYuRevealAnimation: View {
-    let start: Date
-    let origin: CGPoint
-    let oldBackground: Color
-
-    var body: some View {
-        TimelineView(.animation) { context in
-            GeometryReader { proxy in
-                LinYuRevealOverlay(
-                    progress: Self.easedProgress(context.date.timeIntervalSince(start) / 0.65),
-                    origin: origin,
-                    size: proxy.size,
-                    color: oldBackground
-                )
-            }
+        // A programmatic preference change during a reveal is reconciled at completion.
+        guard transition == nil else { return }
+        guard !reduceMotion, scenePhase == .active, displayDark != requestedDark else {
+            applyImmediately()
+            return
+        }
+        withoutAnimation {
+            transition = Transition(oldDark: displayDark, targetDark: requestedDark, origin: reveal.origin)
+            reveal.origin = .zero
+            reveal.isAnimating = true
         }
     }
 
-    private static func easedProgress(_ time: Double) -> Double {
-        let target = min(1, max(0, time))
-        var lower = 0.0, upper = 1.0
-        for _ in 0..<16 {
-            let t = (lower + upper) / 2, u = 1 - t
-            let x = 1.2 * u * u * t + 0.6 * u * t * t + t * t * t
-            if x < target { lower = t } else { upper = t }
-        }
-        let t = (lower + upper) / 2
-        return t * t * (3 - 2 * t)
+    private func applyPreview(id: UUID) {
+        guard let transition, transition.id == id else { return }
+        withoutAnimation { displayDark = transition.targetDark }
     }
-}
 
-private struct LinYuRevealOverlay: View, Animatable {
-    var progress: Double
-    let origin: CGPoint
-    let size: CGSize
-    let color: Color
-    var animatableData: Double {
-        get { progress }
-        set { progress = newValue }
+    private func finish(id: UUID) {
+        guard let transition, transition.id == id else { return }
+        withoutAnimation {
+            displayDark = transition.targetDark
+            self.transition = nil
+            reveal.isAnimating = false
+        }
+        if displayDark != requestedDark { beginReveal() }
     }
-    var body: some View {
-        let center = origin == .zero ? CGPoint(x: size.width - 36, y: 48) : origin
-        let radius = max(max(hypot(center.x, center.y), hypot(size.width - center.x, center.y)),
-                         max(hypot(center.x, size.height - center.y), hypot(size.width - center.x, size.height - center.y))) * 1.15
-        let currentRadius = radius * CGFloat(min(1, max(0, (progress - 0.2) / 0.8)))
-        Path { path in
-            path.addRect(CGRect(origin: .zero, size: size))
-            path.addEllipse(in: CGRect(x: center.x - currentRadius, y: center.y - currentRadius,
-                                      width: currentRadius * 2, height: currentRadius * 2))
-        }.fill(color, style: FillStyle(eoFill: true)).opacity(min(1, progress / 0.2))
+
+    private func finishCurrent() {
+        if let transition { finish(id: transition.id) }
     }
 }
 
@@ -168,10 +151,15 @@ private struct LinYuThemeFrameKey: PreferenceKey {
         Button {
             guard !reveal.isAnimating else { return }
             reveal.origin = CGPoint(x: frame.midX, y: frame.midY)
+            // Lock synchronously so a second tap cannot queue another preference change.
+            reveal.isAnimating = true
             preferences.theme = colors.isDark ? "light" : "dark"
         } label: {
             Text(colors.isDark ? "🌙" : "☀️").font(LinYuType.font(20)).frame(width: 40, height: 40)
-        }.buttonStyle(.plain).accessibilityLabel("切换深浅主题")
+        }.buttonStyle(.plain).disabled(reveal.isAnimating)
+            .accessibilityLabel("切换深浅主题")
+            .accessibilityValue(colors.isDark ? "深色" : "浅色")
+            .accessibilityIdentifier("linyu.theme.toggle")
             .background(GeometryReader { proxy in Color.clear.preference(key: LinYuThemeFrameKey.self, value: proxy.frame(in: .named("linyu.theme"))) })
             .onPreferenceChange(LinYuThemeFrameKey.self) { frame = $0 }
     }
