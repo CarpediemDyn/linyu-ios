@@ -35,7 +35,7 @@
 2. **共享编辑字段与两个选择状态源**：旧 `backgroundScope` 会依次改写 opacity/blur/brightness，并逐项持久化；页面还有独立 AppStorage scope。改为唯一 typed selection 和捕获作用域的 Binding。源码可证实存在中间状态和重复写入；没有把“所有切换都必然串值”当作已证实事实。
 3. **导入目标与操作竞态**：旧页面在 PhotosPicker 返回后才捕获 scope；恢复默认不取消未完成的相册读取。新实现打开选择器即捕获目标；每个作用域一个任务和操作 ID。更换、取消、恢复默认使旧任务失效。提交前再次验证 ID，旧任务不能覆盖新图，也不能取消别的页面发起的新任务。
 4. **导入阻塞风险**：旧 `@MainActor setBackground` 同步缩略、JPEG、写文件和取色。现在照片先以文件表示接收，复制与大图处理在主线程之外；完整文件及主题色准备好后，主线程一次提交配置。失败保留原配置和图片，并显示解码、存储或照片/iCloud 的可操作错误。
-5. **缓存命中之前读磁盘**：旧 `background()` 先 `UIImage(contentsOfFile:)` 再查缓存。新 actor 先查 NSCache，最多 2 张 / 64MiB 成本上限（NSCache 允许系统提前逐出）；颜色和特效变化不改变解码任务的 identity。
+5. **缓存命中之前读磁盘**：旧 `background()` 先 `UIImage(contentsOfFile:)` 再查缓存。新 actor 先查 NSCache，配置 countLimit=2、64MiB 成本预算（NSCache 并非硬内存上限，系统可按内存压力逐出）；颜色和特效变化不改变解码任务的 identity。
 6. **滑动亮度生成中间图片**：旧缓存键包含 brightness，并通过 CIContext 为不同值创建 UIImage。新实现保留源 UIImage，创建轻量滤镜图，按需绘制到 Metal drawable；没有每个亮度一份的图片缓存。未测量真实 FPS，不宣称已经达到某个性能提升比例。
 7. **预览 / 实际层实现重复**：旧预览和实际背景分别实现裁切、效果顺序。统一为 BackgroundCanvas 与 BackgroundRenderPipeline，共用底色、sRGB RGB gain、Alpha、裁切、模糊及 OriginalGlassCard。尚未证实旧顺序差异必然造成肉眼可见偏差。
 8. **换图失效与重启一致性**：成功保存的 JPEG 才是取色和显示来源，避免旧版取色用压缩前图片、显示用压缩后图片。每次换图有新 revision，保存相对文件名；迁移时可将旧绝对路径重定位到当前 Backgrounds 中同名文件。
