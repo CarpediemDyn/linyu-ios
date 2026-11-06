@@ -39,5 +39,13 @@
 - 修改后的 About 视图通过 Swift 语法树解析；当前 Windows 环境未执行 Xcode 编译或 UI 测试。
 - `git diff --check` 通过。App 显示名称、图标、Bundle Identifier、部署版本、构建配置和工作流均保留。
 - README 为中文项目首页，加入当前能力边界、构建安装说明、维护者和原作者归属。
-- 仓库 Description 和 Topics 按用户要求更新。公开操作与匿名访问结果在操作后补充记录。
+- 仓库 Description 和 Topics 按用户要求更新。正式公开前，对加入资料后的全部 61 个可达提交重新扫描，仍只有上表中两项已核实的基线命中。
 - 本轮没有触发 GitHub Actions、生成新 IPA 或合并独立蓝牙结算修复分支。
+
+## 公开结果
+
+仓库已通过 GitHub CLI 的官方仓库设置接口设为 Public，默认分支为 `main`，名称和 URL 保留。未携带 Authorization、Cookie 或 GitHub 登录态的独立 HTTP 请求验证了仓库网页、仓库 API 和 raw main/README，三者均返回 200。API 确认 `private=false`、`visibility=public`、`default_branch=main`；README 内容包含 Cra3y、yehu-imei 和独立版本说明。
+
+Description 为 “LinYu iOS — SwiftUI port of the LinYu Android campus water management app. Maintained by Cra3y.”，Topics 为 swiftui、ios、ipad、bluetooth、corebluetooth、linyu。
+
+主体资料和 App 关于页面提交为 `32ddabc`。本记录的后续提交仅补充公开验证结果。公开前后 Actions 的运行总数均为 48，本轮没有新增工作流执行或 IPA。独立功能修复分支均未合并，历史没有重写。
