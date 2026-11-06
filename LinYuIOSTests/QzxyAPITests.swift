@@ -447,8 +447,8 @@ import XCTest
             XCTAssertEqual(request.url?.path, "/order/query/account/bill/list")
             let query = URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)
             XCTAssertEqual(query?.queryItems?.first { $0.name == "month" }?.value, "2026-10")
-            func bill(_ order: String, _ amount: String, date: String = "2026-10-01 10:00:00", sn: String? = nil) -> [String: Any] {
-                var data = ["orderId": "db-" + order, "orderNo": order, "consumeMoney": amount,
+            func bill(_ order: String, _ amount: String, date: String = "2026-10-01 10:00:00", sn: String? = nil, id: String? = nil) -> [String: Any] {
+                var data = ["orderId": id ?? ("db-" + order), "orderNo": order, "consumeMoney": amount,
                             "consumeDate": date, "description": "测试"]
                 data["deviceSnCode"] = sn
                 return ["consumeBillDTO": data]
@@ -456,7 +456,8 @@ import XCTest
             return try self.response(["success": true, "data": [bill("other", "6.00"), bill("old", "0"),
                 bill("paid", "0.41"), bill("wrong-meter", "0.41", sn: "other-sn"),
                 bill("wrong-time", "0.41", date: "2026-10-01 10:00:01"),
-                bill("ambiguous", "0.41"), bill("ambiguous", "0.53")]])
+                bill("ambiguous", "0.41"), bill("ambiguous", "0.53"),
+                bill("other-order", "1.30", id: "paid"), bill("explicit-other", "4.00", id: "foreign-id")]])
         }
         defer { fixture.invalidateAndCancel() }
         let transport = TestTransport(id: UUID())
@@ -473,7 +474,7 @@ import XCTest
         tx.orderNo = "paid"
         let paid = try await api.hasRecordedConsumption(tx, session: auth)
         XCTAssertTrue(paid)
-        for order in ["wrong-meter", "wrong-time", "ambiguous", "missing"] {
+        for order in ["wrong-meter", "wrong-time", "ambiguous", "missing", "foreign-id"] {
             tx.orderNo = order
             let matched = try await api.hasRecordedConsumption(tx, session: auth)
             XCTAssertFalse(matched, order)

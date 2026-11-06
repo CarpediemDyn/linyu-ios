@@ -61,7 +61,6 @@ import SwiftUI
         .accessibilityAction(.escape) {
             if stopConfirmation != nil { stopConfirmation = nil } else { onBack() }
         }
-        .accessibilityIdentifier("linyu.shower")
     }
 
     private func showerContent(at date: Date) -> some View {

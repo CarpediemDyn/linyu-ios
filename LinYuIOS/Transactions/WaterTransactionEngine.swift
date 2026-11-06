@@ -30,6 +30,11 @@ import Foundation
                 record.phase = .needsAttention
                 record.idleConfirmed = false
             }
+            // Old idle recovery overwrote the original phase. A saved consumption body
+            // in those records may already have reached the server.
+            if record.phase == .needsAttention, record.consumption != nil, record.receipt == nil {
+                record.phase = .uploadUnknown
+            }
             if record.isPending, record.isSettlementRecovery, record.closureEvidence == nil {
                 record.legacyUnverifiedSettlement = true
                 record.valve = .unknown
@@ -239,7 +244,7 @@ import Foundation
                 previous.lastError = nil
                 previous.failureReportPending = false
             } else if previous.phase != .uploadUnknown {
-                previous.phase = .needsAttention
+                previous.phase = previous.consumption == nil ? .needsAttention : .uploadUnknown
             }
             try save(previous)
         }
@@ -293,7 +298,7 @@ import Foundation
         do {
             let checkedBill = needsBillCheck(tx)
             if checkedBill { try await checkBill(&tx, session: session, trace: trace) }
-            if tx.idleConfirmed, tx.closureEvidence != nil, tx.billConfirmed == true {
+            if tx.idleConfirmed, tx.closureEvidence != nil, tx.billConfirmed == true || tx.receipt != nil {
                 try completeIdle(&tx)
                 return
             }
@@ -301,13 +306,11 @@ import Foundation
                 // An ambiguous charge cannot be resolved by inspecting a previously closed meter.
                 throw WaterError.invalid("服务器结算结果待核实，请稍后再次查询账单")
             }
-            if tx.isSettlementRecovery {
-                stage = "核对本地订单"
-                guard !hasNewerUsage(than: tx) else { throw WaterError.reconciliation }
-                guard transport.isAvailableForRecovery(tx.binding.peripheralID) else {
-                    stage = "等待原水表"
-                    throw WaterError.invalid(WaterError.meterRecoveryGuidance)
-                }
+            stage = "核对本地订单"
+            guard !hasNewerUsage(than: tx) else { throw WaterError.reconciliation }
+            if tx.isSettlementRecovery, !transport.isAvailableForRecovery(tx.binding.peripheralID) {
+                stage = "等待原水表"
+                throw WaterError.invalid(WaterError.meterRecoveryGuidance)
             }
 
             usedBluetooth = true
@@ -414,6 +417,7 @@ import Foundation
                 ? "账单已核实，原水表仍有遗留数据，缺少清账凭据"
                 : "服务器结算结果待核实，请稍后再次查询账单")
         }
+        if tx.idleConfirmed { throw WaterError.reconciliation }
         if !freshClose, tx.legacyUnverifiedSettlement == true, tx.consumption == nil {
             throw WaterError.invalid("无法把水表遗留数据与这笔历史订单对应，请在账单中核对")
         }
@@ -514,6 +518,7 @@ import Foundation
         busy = true; onChange?(); defer { end() }
         var tx = try record(id, session: session)
         guard tx.isPending else { return }
+        guard !hasNewerUsage(than: tx) else { throw WaterError.reconciliation }
         let state = try await verified(tx.binding, session: session)
         if state.state == 1 {
             guard mayCloseRunningValve(for: tx) else { throw WaterError.reconciliation }

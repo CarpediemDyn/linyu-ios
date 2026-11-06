@@ -328,6 +328,28 @@ import XCTest
         XCTAssertEqual(restored.consumption, tx.consumption)
     }
 
+    func testLegacySupersededChargeWithSavedConsumptionIsNeverReplayed() async throws {
+        let (engine, ble, api, store) = try make()
+        let binding = try await engine.pair(device: device, session: session)
+        let payload = Data([0x80]) + Data(repeating: 0xA7, count: 41)
+        let tx = WaterTransaction(id: UUID(), binding: binding, phase: .superseded, valve: .closed,
+            protocolType: "1", randomNumber: "", consumeDate: "261104120000", orderNo: "superseded",
+            consumption: payload, receipt: nil, writeBack: nil, failureReportPending: false,
+            lastError: nil, updatedAt: Date())
+        try store.save(WaterJournal(transactions: [tx]))
+        let restored = try WaterTransactionEngine(transport: ble, service: api, store: store, decodeWriteBack: { _ in nil })
+        ble.state = 3
+        ble.consumptionOverride = payload
+        let before = ble.commands.count
+        do { try await restored.recover(id: tx.id, session: session); XCTFail("no bill confirmation") }
+        catch WaterError.invalid {}
+        XCTAssertEqual(Array(ble.commands.dropFirst(before)), [0x23])
+        XCTAssertEqual(api.uploadCalls, 0)
+        XCTAssertEqual(api.billChecks, 1)
+        XCTAssertEqual(restored.journal.transactions.last?.phase, .uploadUnknown)
+        XCTAssertEqual(restored.journal.transactions.last?.consumption, payload)
+    }
+
     func testLegacyCloseOnlyRecordCannotStopAnotherRunningSession() async throws {
         let (engine, ble, api, store) = try make()
         let binding = try await engine.pair(device: device, session: session)
@@ -380,6 +402,31 @@ import XCTest
         XCTAssertEqual(Array(ble.commands.dropFirst(before)), [0x23, 0x23])
         XCTAssertEqual(api.uploadCalls, 1)
         XCTAssertEqual(engine.journal.transactions.map(\.id), [id])
+    }
+
+    func testOlderRunningRecordCannotCollectFromNewerAccountUsage() async throws {
+        let (engine, ble, api, _) = try make()
+        let binding = try await engine.pair(device: device, session: session)
+        try await engine.open(binding: binding, session: session)
+        let stale = try XCTUnwrap(engine.journal.transactions.last)
+        // The device was closed outside this app, leaving A's journal stale.
+        ble.state = 0
+        let other = QzxySession(telephone: "13900139000", loginCode: "another", userId: "8",
+                                accountId: "1", projectId: "513")
+        let otherBinding = try await engine.pair(device: device, session: other)
+        try await engine.open(binding: otherBinding, session: other)
+        let current = try XCTUnwrap(engine.journal.transactions.last)
+        api.failUpload = true
+        do { try await engine.closeAndSettle(id: current.id, session: other); XCTFail("upload timed out") }
+        catch WaterError.disconnected {}
+
+        api.failUpload = false
+        let before = ble.commands
+        do { try await engine.recover(id: stale.id, session: session); XCTFail("newer account owns the record") }
+        catch WaterError.reconciliation {}
+        XCTAssertEqual(ble.commands, before)
+        XCTAssertEqual(api.uploadCalls, 1)
+        XCTAssertEqual(engine.journal.transactions.last?.phase, .uploadUnknown)
     }
 
     func testLostUploadResponseChecksAccountBeforeAttemptingBluetooth() async throws {

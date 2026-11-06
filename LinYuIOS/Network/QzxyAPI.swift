@@ -185,7 +185,10 @@ struct QzxyAPI: WaterMeterService {
         let localDate = Self.settlementBillDate(transaction.consumeDate, timeZone: formatter.timeZone)
         let month = formatter.string(from: localDate ?? transaction.startedAt ?? transaction.updatedAt)
         let rows = try await bills(month: month, session: session)
-        let matches = rows.filter { $0.orderNo == orderNo || $0.orderId == orderNo }
+        let exactOrders = rows.filter { $0.orderNo == orderNo }
+        let matches = exactOrders.isEmpty
+            ? rows.filter { OriginalJSON.nonempty($0.orderNo) == nil && $0.orderId == orderNo }
+            : exactOrders
         guard matches.count == 1, let bill = matches.first, bill.amount.isFinite, bill.amount > 0 else {
             // Missing and zero-amount rows may be delayed or pending and never authorize replay.
             return false
