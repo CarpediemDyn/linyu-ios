@@ -90,7 +90,7 @@ jobs:
     if: ${{ !inputs.preflight_only && inputs.inspect_run == '' }}
     needs: [wait_for_service, preflight]
     runs-on: ${{ inputs.runner || 'macos-26-intel' }}
-    timeout-minutes: 35
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - name: Verify frozen source
