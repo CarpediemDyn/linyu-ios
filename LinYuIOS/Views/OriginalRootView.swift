@@ -36,7 +36,6 @@ import SwiftUI
     var body: some View {
         LinYuThemeHost(preferences: model.preferences) {
             ZStack(alignment: .bottom) {
-                OriginalBackground(preferences: model.preferences, shower: false)
                 if model.auth.session == nil {
                     AccountView(auth: model.auth)
                 } else {
@@ -55,6 +54,9 @@ import SwiftUI
                     LinYuNavigationInset(selection: tab)
                 }
             }
+            // A background observes the full root, including the navigation inset, without
+            // an edge-to-edge GeometryReader participating in the foreground layout.
+            .background { OriginalBackground(preferences: model.preferences, shower: false) }
             .overlay(alignment: .top) {
                 OriginalToast(message: model.message) { text in
                     if model.message == text { model.message = "" }
