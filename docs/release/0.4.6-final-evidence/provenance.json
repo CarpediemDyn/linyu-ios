@@ -1,0 +1,16 @@
+[
+  {
+    "file": "home.png",
+    "source_commit": "05b4563830892110e69e76ad950a61e349da8395",
+    "run_id": 42227337569,
+    "sha256": "2c20421dec0862dc9aa1395ea0cb2f9d23da28d9ba43eeef0a616239fba712ff",
+    "processing": "Unchanged actual simulator Mock screenshot; no real account or meter"
+  },
+  {
+    "file": "wallet.png",
+    "source_commit": "05b4563830892110e69e76ad950a61e349da8395",
+    "run_id": 42227337569,
+    "sha256": "ac543125129c4f338c27b4f172ab9bc66a787ec07d0e0e58a1ad7c926841af8d",
+    "processing": "Unchanged actual simulator Mock screenshot; no real account or meter"
+  }
+]

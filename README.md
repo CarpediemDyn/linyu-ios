@@ -26,23 +26,25 @@ BLE 连接、开关阀和设备清账需要靠近原水表。上传结果未知�
 
 ## 源码、构建与发布
 
+**[下载 v0.4.6（Build 10）iPhone 测试版](https://github.com/CarpediemDyn/linyu-ios/releases/tag/v0.4.6)** · [直接下载 IPA](https://github.com/CarpediemDyn/linyu-ios/releases/download/v0.4.6/LinYu-LiveContainer.ipa) · [完整检查报告](docs/release/0.4.6-final.md)
+
 | 类别 | 当前状态 |
 | --- | --- |
-| 默认源码 `main` | 配置为 **v0.4.4（Build 8）**，基于已验收的 `afde230`；本次 README 与署名改动尚未生成新 IPA |
-| 最终整合候选源码 | **v0.4.6（Build 10）**，`release/0.4.6-20261106`，已整合结算、自动名称、主题、背景与署名分支；iPhone 完整预检已通过 177 单元与 8 UI，待最终设备编译、签名和 IPA；本轮 iPad 暂不验收 |
-| 最近成功 IPA | **v0.4.5（Build 9）**，源码 `c6d6c3302aa92161cd6ff48656a671cbbcf47de5`，来自 `fix/ble-settlement-recovery` |
-| 主题 / 背景 / 名称修复 | 已纳入上述整合候选，原独立分支保留；静态检查不能替代运行和真机验证 |
-| 正式发布 | 当前没有 GitHub Release；Actions 构建制品属于测试构建 |
+| 默认源码 `main` | **v0.4.6（Build 10）**，整合结算、自动名称、主题、背景与署名分支；后续发布资料更新不改变产品代码 |
+| 已构建产品源码 | 标签 `v0.4.6`，`05b4563830892110e69e76ad950a61e349da8395`；整合分支 `release/0.4.6-20261106` |
+| 最近成功 IPA | **v0.4.6（Build 10）**；[Actions 42227337569](https://github.com/CarpediemDyn/linyu-ios/actions/runs/42227337569) |
+| 旧成功基线 | v0.4.5（Build 9），源码 `c6d6c3302aa92161cd6ff48656a671cbbcf47de5`，保留为 `baseline/v0.4.5-build9` |
+| GitHub Release | 已发布 **v0.4.6 iPhone 测试版（Pre-release）**，不宣称正式稳定版或全部硬件验收 |
 
-v0.4.5 构建通过 43 项核心测试、125 项 iOS 测试（包含这 43 项核心测试）、7 项 UI 测试和 8 项打包测试。测试使用 Mock 网络和 BLE；这些是旧版结果，不能算作 v0.4.6 已通过。历史异常交易的真实账单及设备写回仍需原 iPhone 验证。 [成功构建记录](https://github.com/CarpediemDyn/linyu-ios/actions/runs/42154843612) · [v0.4.5 验证报告](https://github.com/CarpediemDyn/linyu-ios/blob/fix/ble-settlement-recovery/docs/ble-settlement-recovery-v0.4.5.md) · [v0.4.6 发布前检查](docs/release/0.4.6-readiness.md)
+最终固定源码通过 **177 项 iOS 单元测试、全部 8 项 UI 测试**，涵盖快/慢登录、失败恢复、防重复提交、横屏输入、历史订单恢复、双向主题与实际导航切页；Ubuntu/macOS 各通过 51 项核心和 8 项打包测试。51 Core 已包含在 177 中，不重复计数。全部自动化使用 Mock 网络/BLE，不操作真实校园水表或产生消费。
 
-v0.4.6 初次运行有 3 项 UI 失败，后续失败记录全部保留。导航装饰层修正后的固定源码 `e3c1571` 已在 iPhone 17 Pro 模拟器通过 177 项单元测试和全部 8 项 UI 测试；Ubuntu/macOS 各通过 51 项核心与 8 项打包测试（51 Core 已包含在 177 中）。临时诊断已移除，普通点击、输入校验、主题和历史恢复断言均保留。用户明确暂缓 iPad 适配，iPad 密码模式提交触摸问题未解决，不能视为 iPad 可用性承诺。
+IPA 已验证 arm64 / iphoneos、AppIcon、严格 ad-hoc 签名、ZIP CRC、全部成员哈希与来源提交。未登录访问 Release 并重新下载 IPA 校验通过；校验文件及报告随 Release 提供。首次及后续失败记录保留在 [继续验证记录](docs/release/0.4.6-validation.md)。
 
-目前尚未生成新 IPA 或创建 Release；最终固定源码将增加导航点击后实际页面切换的断言，并在正式任务再次执行全量测试后才进入真机包构建和签名。见 [继续验证记录](docs/release/0.4.6-validation.md) 与 [iPhone 完整预检](https://github.com/CarpediemDyn/linyu-ios/actions/runs/42224770638)。
+本轮按用户要求暂缓 iPad 适配。iPad 密码模式切换后已有登录按钮触摸问题尚未解决，不能把现有宽屏布局视为 iPad 可用性承诺。447/450 等真实历史订单、校园服务、设备写回及 LiveContainer 后台/通知仍需原手机与原水表验证。
 
 ## 构建与安装
 
-使用 Swift / SwiftUI、Core Bluetooth 和 Apple 系统框架。最低部署版本为 **iOS / iPadOS 16.0**。完整工程构建需要 macOS、Xcode 和 XcodeGen。
+使用 Swift / SwiftUI、Core Bluetooth 和 Apple 系统框架。最低部署版本为 **iOS 16.0**；本测试版验收范围为 iPhone。完整工程构建需要 macOS、Xcode 和 XcodeGen。
 
 ```sh
 brew install xcodegen
@@ -51,13 +53,11 @@ xcodegen generate --spec project-livecontainer.yml
 open LinYuLiveContainer.xcodeproj
 ```
 
-在 Xcode 选择可用 iPhone / iPad 模拟器运行测试。`project-livecontainer.yml` 生成 LiveContainer 工程，`project.yml` 提供常规应用与 Widget 工程；后者需要自行配置 Apple 开发团队、签名及 App Group。
+在 Xcode 选择可用 iPhone 模拟器运行测试。`project-livecontainer.yml` 生成 LiveContainer 工程，`project.yml` 提供常规应用与 Widget 工程；后者需要自行配置 Apple 开发团队、签名及 App Group。
 
-仅在明确授权打包后，在 GitHub Actions 的 **Build LiveContainer IPA** 工作流选择已固定的分支、完整源码 SHA、macOS runner 和模拟器类型。`preflight_only=true` 仅运行 Ubuntu 资源/配置、打包与 Mock 核心检查，不分配 Mac、不生成 IPA。正式构建先通过同一预检，再运行全部 iOS/UI 测试；测试成功才生成 arm64 真机包、验证 ad-hoc 签名并输出 `LinYu-LiveContainer.ipa`。失败不会自动重试。
+仅在明确授权打包后，在 GitHub Actions 的 **Build LiveContainer IPA** 工作流选择已固定的分支、完整源码 SHA、macOS runner 和模拟器类型。默认 `tests_only=true` 仅测试、不生成 IPA；明确授权打包时才设为 `false`。`preflight_only=true` 仅运行 Ubuntu 资源/配置、打包与 Mock 核心检查，不分配 Mac、不生成 IPA。正式构建先通过同一预检，再运行全部 iOS/UI 测试；测试成功才生成 arm64 真机包、验证 ad-hoc 签名并输出 `LinYu-LiveContainer.ipa`。失败不会自动重试。
 
-在成功工作流的 Artifacts 中下载 `LinYu-LiveContainer-IPA`，解压后将 IPA 导入 LiveContainer。制品有保留期限，下载可能需要登录 GitHub。升级已有安装时保留原 LiveContainer 应用数据，以继续读取本地交易记录。
-
-[最近成功的 IPA 制品](https://github.com/CarpediemDyn/linyu-ios/actions/runs/42154843612/artifacts/13473054957)
+从上述 Release 下载 `LinYu-LiveContainer.ipa`，在 iPhone 的 LiveContainer 导入。已有安装请使用替换/升级并保留原应用数据，以继续读取本地交易恢复记录。无需从 Actions 下载或登录 GitHub。可用 Release 附带的 `.sha256` 核对文件。
 
 LiveContainer 包的 ad-hoc 签名用于宿主加载，并非 App Store / TestFlight 分发签名，不能按普通 Apple 签名安装包使用。iOS 后台执行、通知和桌面组件受系统与宿主限制。更新与测试版的最终下载以 [GitHub Releases](https://github.com/CarpediemDyn/linyu-ios/releases) 为准；未出现的制品不代表已经生成。
 
