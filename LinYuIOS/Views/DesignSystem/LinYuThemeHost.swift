@@ -145,6 +145,17 @@ private struct LinYuThemeFrameKey: PreferenceKey {
 @MainActor struct LinYuThemeToggle: View {
     @ObservedObject var preferences: OriginalPreferences
     @Environment(\.linYuThemeReveal) private var reveal
+
+    var body: some View {
+        LinYuThemeToggleButton(preferences: preferences, reveal: reveal)
+    }
+}
+
+/// EnvironmentKey transports the reference but does not subscribe to its Combine changes.
+/// Observe the lock explicitly so completion re-enables the button without another page update.
+@MainActor private struct LinYuThemeToggleButton: View {
+    @ObservedObject var preferences: OriginalPreferences
+    @ObservedObject var reveal: LinYuThemeReveal
     @Environment(\.linYuColors) private var colors
     @State private var frame = CGRect.zero
     var body: some View {

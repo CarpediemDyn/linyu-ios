@@ -1,4 +1,5 @@
 import XCTest
+import CoreFoundation
 
 /// Exercises the real login UI without using any account or calling the API.
 final class LoginVisualTests: XCTestCase {
@@ -40,6 +41,7 @@ final class LoginVisualTests: XCTestCase {
         defer { device.orientation = .portrait }
         let app = launchFixture("fast")
         let phone = app.textFields["手机号"]
+        guard reveal(phone, in: app) else { return }
         phone.tap()
         phone.typeText("12")
         device.orientation = .landscapeLeft
@@ -71,7 +73,7 @@ final class LoginVisualTests: XCTestCase {
     @MainActor func testFastAndOrdinaryMockLoginReachHome() {
         for scenario in ["fast", "ordinary"] {
             let app = launchFixture(scenario)
-            let login = enterCredentials(in: app)
+            guard let login = enterCredentials(in: app) else { return }
             login.tap()
             XCTAssertTrue(app.descendants(matching: .any)["linyu.home"].firstMatch.waitForExistence(timeout: 8))
             if scenario == "ordinary" {
@@ -92,7 +94,7 @@ final class LoginVisualTests: XCTestCase {
 
     @MainActor func testSlowMockLoginShowsDisabledLoadingAndReachesHome() {
         let app = launchFixture("slow")
-        let login = enterCredentials(in: app)
+        guard let login = enterCredentials(in: app) else { return }
         login.press(forDuration: 0.25)
         let loading = NSPredicate(format: "value == %@", "正在登录")
         let visible = XCTNSPredicateExpectation(predicate: loading, object: login)
@@ -102,12 +104,13 @@ final class LoginVisualTests: XCTestCase {
         XCTAssertFalse(login.isEnabled)
         capture(app, "login-mock-loading")
         login.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        releaseFixtureResponse(in: app)
         XCTAssertTrue(app.descendants(matching: .any)["linyu.home"].firstMatch.waitForExistence(timeout: 10))
     }
 
     @MainActor func testFailedMockLoginRestoresButton() {
         let app = launchFixture("failure")
-        let login = enterCredentials(in: app)
+        guard let login = enterCredentials(in: app) else { return }
         login.tap()
         XCTAssertTrue(app.staticTexts["连接超时，请检查网络后重试"].waitForExistence(timeout: 8))
         XCTAssertTrue(login.isEnabled)
@@ -117,33 +120,58 @@ final class LoginVisualTests: XCTestCase {
 
     @MainActor func testLoginIsDisabledWhileSMSRequestIsInFlight() {
         let app = launchFixture("slow")
-        let login = enterCredentials(in: app)
+        guard let login = enterCredentials(in: app) else { return }
         let send = app.buttons["发送"]
         XCTAssertTrue(send.isHittable)
         send.tap()
         XCTAssertFalse(login.isEnabled)
+        releaseFixtureResponse(in: app)
     }
 
     @MainActor private func launchFixture(_ scenario: String) -> XCUIApplication {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
         app.launchEnvironment["LINYU_LOGIN_FIXTURE"] = scenario
+        if scenario == "slow" { app.launchEnvironment["LINYU_LOGIN_GATE"] = UUID().uuidString }
         app.launch()
         XCTAssertTrue(app.textFields["手机号"].waitForExistence(timeout: 15))
         return app
     }
 
-    @MainActor private func enterCredentials(in app: XCUIApplication) -> XCUIElement {
+    @MainActor private func enterCredentials(in app: XCUIApplication) -> XCUIElement? {
         let phone = app.textFields["手机号"]
+        guard reveal(phone, in: app) else { return nil }
         phone.tap()
         phone.typeText("00000000000")
         let code = app.textFields["验证码"]
+        guard reveal(code, in: app) else { return nil }
         code.tap()
         code.typeText("123456")
         let login = app.buttons["登 录"]
-        if !login.isHittable { app.swipeUp() }
-        XCTAssertTrue(login.isHittable)
+        guard reveal(login, in: app) else { return nil }
         return login
+    }
+
+    @MainActor private func reveal(_ control: XCUIElement, in app: XCUIApplication) -> Bool {
+        let form = app.scrollViews.firstMatch
+        for upward in [true, false] {
+            for _ in 0..<4 {
+                if control.exists && control.isHittable { return true }
+                guard form.exists else { break }
+                if upward { form.swipeUp() } else { form.swipeDown() }
+            }
+        }
+        if control.exists && control.isHittable { return true }
+        XCTFail("The login control must remain reachable by normal scrolling: \(control)")
+        return false
+    }
+
+    @MainActor private func releaseFixtureResponse(in app: XCUIApplication) {
+        guard let token = app.launchEnvironment["LINYU_LOGIN_GATE"] else {
+            return XCTFail("Missing explicit mock-response gate")
+        }
+        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName(("org.linyu.fixture.login." + token) as CFString), nil, nil, true)
     }
 
     @MainActor private func capture(_ app: XCUIApplication, _ name: String) {

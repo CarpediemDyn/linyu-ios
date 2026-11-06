@@ -1,10 +1,14 @@
 #if targetEnvironment(simulator)
 import Foundation
+import CoreFoundation
 
 /// Drives the real login and home views from XCUITest without a real account.
 @MainActor enum LoginFeedbackFixture {
     static func model() -> OriginalAppModel? {
         guard let scenario = ProcessInfo.processInfo.environment["LINYU_LOGIN_FIXTURE"] else { return nil }
+        if let token = ProcessInfo.processInfo.environment["LINYU_LOGIN_GATE"] {
+            LoginFixtureGate.configure(token)
+        }
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [LoginFeedbackURLProtocol.self]
         let api = QzxyAPI(session: URLSession(configuration: configuration))
@@ -60,6 +64,7 @@ import Foundation
 
 private final class LoginFeedbackURLProtocol: URLProtocol {
     private var delivery: DispatchWorkItem?
+    private let deliveryID = UUID()
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -99,9 +104,63 @@ private final class LoginFeedbackURLProtocol: URLProtocol {
             self.client?.urlProtocolDidFinishLoading(self)
         }
         delivery = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+        if scenario == "slow", ProcessInfo.processInfo.environment["LINYU_LOGIN_GATE"] != nil,
+           isLogin || url.path == "/user/verification/code/get" {
+            LoginFixtureGate.hold(work, id: deliveryID)
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+        }
     }
 
-    override func stopLoading() { delivery?.cancel() }
+    override func stopLoading() { delivery?.cancel(); LoginFixtureGate.remove(deliveryID) }
+}
+
+/// Simulator-only, cross-process test gate. UI automation can inspect/press the loading
+/// button before explicitly releasing the mock response, without delaying real logins.
+private enum LoginFixtureGate {
+    private final class State: @unchecked Sendable {
+        let lock = NSLock()
+        var name: String?
+        var released = false
+        var pending: [UUID: DispatchWorkItem] = [:]
+    }
+    private static let state = State()
+
+    static func configure(_ token: String) {
+        let name = "org.linyu.fixture.login." + token
+        state.lock.lock()
+        guard state.name != name else { state.lock.unlock(); return }
+        let old = state.name
+        state.name = name; state.released = false; state.pending = [:]
+        state.lock.unlock()
+        let center = CFNotificationCenterGetDarwinNotifyCenter()
+        let observer = Unmanaged.passUnretained(state).toOpaque()
+        if let old { CFNotificationCenterRemoveObserver(center, observer, CFNotificationName(old as CFString), nil) }
+        CFNotificationCenterAddObserver(center, observer, { _, _, name, _, _ in
+            if let name { LoginFixtureGate.release(name.rawValue as String) }
+        }, name as CFString, nil, .deliverImmediately)
+    }
+
+    static func hold(_ work: DispatchWorkItem, id: UUID) {
+        state.lock.lock()
+        let released = state.released
+        if !released { state.pending[id] = work }
+        state.lock.unlock()
+        if released { DispatchQueue.main.async(execute: work) }
+    }
+
+    static func release(_ name: String) {
+        state.lock.lock()
+        guard state.name == name else { state.lock.unlock(); return }
+        state.released = true
+        let jobs = Array(state.pending.values); state.pending = [:]
+        state.lock.unlock()
+        for work in jobs { DispatchQueue.main.async(execute: work) }
+    }
+
+    static func remove(_ id: UUID) {
+        state.lock.lock(); defer { state.lock.unlock() }
+        state.pending[id] = nil
+    }
 }
 #endif
