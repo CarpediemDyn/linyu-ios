@@ -36,6 +36,17 @@ final class ThemeTransitionTests: XCTestCase {
                 XCTAssertTrue(navigation.isHittable)
                 XCTAssertTrue(app.frame.contains(navigation.frame))
                 navigation.tap()
+                switch tab {
+                case 0:
+                    XCTAssertTrue(app.descendants(matching: .any)["linyu.home"].firstMatch.waitForExistence(timeout: 5),
+                                  "The home button must actually select the home page")
+                case 1:
+                    XCTAssertTrue(app.descendants(matching: .any)["linyu.wallet"].firstMatch.waitForExistence(timeout: 5),
+                                  "The wallet button must actually select the wallet page")
+                default:
+                    XCTAssertTrue(toggle.waitForExistence(timeout: 5),
+                                  "The profile button must actually restore the profile page")
+                }
                 capture(app, "theme-page-\(tab)-\(direction)")
             }
             app.buttons["打开设置"].tap()

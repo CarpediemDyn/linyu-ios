@@ -26,5 +26,19 @@
     "run_id": 42221696891,
     "sha256": "b960c3237320f02daa67d44c3c99d2f498888546252e121aed64a9f1ef9efd1a",
     "processing": "Original failure screenshot, unchanged; simulator Mock account"
+  },
+  {
+    "file": "iphone-theme-dark.png",
+    "source_commit": "e3c1571a41a77b49b990058d46edc1ee43383aae",
+    "run_id": 42224770638,
+    "sha256": "6c320336926a2248c3b07fa35ef91c7ad373dc090cc4438f5d44711677d85fe3",
+    "processing": "Original simulator Mock screenshot, unchanged; inspected theme endpoint and complete navigation"
+  },
+  {
+    "file": "iphone-theme-light.png",
+    "source_commit": "e3c1571a41a77b49b990058d46edc1ee43383aae",
+    "run_id": 42224770638,
+    "sha256": "ee1f64f3cb1f2dd65b7fc11ebbaa490178a8f2005fa4c8f3b0e08001140ce712",
+    "processing": "Original simulator Mock screenshot, unchanged; inspected theme endpoint and complete navigation"
   }
 ]

@@ -29,14 +29,16 @@ BLE 连接、开关阀和设备清账需要靠近原水表。上传结果未知�
 | 类别 | 当前状态 |
 | --- | --- |
 | 默认源码 `main` | 配置为 **v0.4.4（Build 8）**，基于已验收的 `afde230`；本次 README 与署名改动尚未生成新 IPA |
-| 最终整合候选源码 | **v0.4.6（Build 10）**，`release/0.4.6-20261106`，已整合结算、自动名称、主题、背景与署名分支；本次 UI 测试未全通过，暂停发布，未生成新 IPA |
+| 最终整合候选源码 | **v0.4.6（Build 10）**，`release/0.4.6-20261106`，已整合结算、自动名称、主题、背景与署名分支；iPhone 完整预检已通过 177 单元与 8 UI，待最终设备编译、签名和 IPA；本轮 iPad 暂不验收 |
 | 最近成功 IPA | **v0.4.5（Build 9）**，源码 `c6d6c3302aa92161cd6ff48656a671cbbcf47de5`，来自 `fix/ble-settlement-recovery` |
 | 主题 / 背景 / 名称修复 | 已纳入上述整合候选，原独立分支保留；静态检查不能替代运行和真机验证 |
 | 正式发布 | 当前没有 GitHub Release；Actions 构建制品属于测试构建 |
 
 v0.4.5 构建通过 43 项核心测试、125 项 iOS 测试（包含这 43 项核心测试）、7 项 UI 测试和 8 项打包测试。测试使用 Mock 网络和 BLE；这些是旧版结果，不能算作 v0.4.6 已通过。历史异常交易的真实账单及设备写回仍需原 iPhone 验证。 [成功构建记录](https://github.com/CarpediemDyn/linyu-ios/actions/runs/42154843612) · [v0.4.5 验证报告](https://github.com/CarpediemDyn/linyu-ios/blob/fix/ble-settlement-recovery/docs/ble-settlement-recovery-v0.4.5.md) · [v0.4.6 发布前检查](docs/release/0.4.6-readiness.md)
 
-v0.4.6 的固定源码 `f343494` 在 Ubuntu/macOS 通过 51 项核心测试、8 项打包测试，在 iOS 模拟器通过 177 项单元测试（含上述 51 项核心测试）；8 项 UI 测试中 5 项通过、3 项失败，因此没有执行真机包构建及签名。后续已运行 iPhone 和 iPad 测试：177 项单元测试持续通过，主题与历史恢复 UI 已通过；用户已调整为先发布 iPhone 测试版，iPad 暂不适配，密码模式触摸问题未解决并保留记录；iPhone 最新完整运行已通过 177 单元、6 登录及历史恢复 UI，主题导航的可点击断言仍失败，正在修正装饰层并重新验证；尚不生成 IPA 或发布。用户已授权继续验证及完成后的必要构建。最新证据见 [继续验证记录](docs/release/0.4.6-validation.md)。见 [实际质量检查报告](docs/release/0.4.6-quality-results.md) 与 [失败运行](https://github.com/CarpediemDyn/linyu-ios/actions/runs/42173058772)。
+v0.4.6 初次运行有 3 项 UI 失败，后续失败记录全部保留。导航装饰层修正后的固定源码 `e3c1571` 已在 iPhone 17 Pro 模拟器通过 177 项单元测试和全部 8 项 UI 测试；Ubuntu/macOS 各通过 51 项核心与 8 项打包测试（51 Core 已包含在 177 中）。临时诊断已移除，普通点击、输入校验、主题和历史恢复断言均保留。用户明确暂缓 iPad 适配，iPad 密码模式提交触摸问题未解决，不能视为 iPad 可用性承诺。
+
+目前尚未生成新 IPA 或创建 Release；最终固定源码将增加导航点击后实际页面切换的断言，并在正式任务再次执行全量测试后才进入真机包构建和签名。见 [继续验证记录](docs/release/0.4.6-validation.md) 与 [iPhone 完整预检](https://github.com/CarpediemDyn/linyu-ios/actions/runs/42224770638)。
 
 ## 构建与安装
 
