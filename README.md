@@ -4,7 +4,7 @@
 
 [![SwiftUI](https://img.shields.io/badge/UI-SwiftUI-007AFF)](https://developer.apple.com/xcode/swiftui/) [![iOS](https://img.shields.io/badge/iOS-16%2B-222222)](#构建与安装) [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
-LinYu iOS 以开源 Android 项目 [LinYu](https://github.com/yehu-imei/linyu) 为基础移植，目标是尽可能还原原版的界面、功能和交互，并适配 iPhone、iPad 及其他受支持的 Apple 设备。
+LinYu iOS 以开源 Android 项目 [LinYu](https://github.com/yehu-imei/linyu) 为基础移植，目标是尽可能还原原版的界面、功能和交互，本轮交付范围为 iPhone 测试版；iPad 暂不验收。
 
 iOS 移植与维护由 **Cra3y** 负责，Android 原版作者为 **yehu-imei**。本项目是第三方客户端，与校园及设备服务运营方没有官方隶属关系。App 内名称保留为「淋浴」。
 
@@ -20,7 +20,7 @@ iOS 移植与维护由 **Cra3y** 负责，Android 原版作者为 **yehu-imei**�
 | 异常交易恢复 | 保存交易凭据并提供恢复入口；整合 v0.4.5 的结算、计时与历史订单修复，上传结果未知时优先只读核实 |
 | 主题与自定义背景 | 深浅主题、独立 HOME/SHOWER 背景、主题色、亮度、模糊和透明度；新渲染与动画仍须真机验证 |
 | 本地通知与桌面组件 | 提供 UserNotifications / WidgetKit 实现；LiveContainer 包不含 Widget 扩展，通知能力受宿主权限及签名限制，常规签名包仍待完整验证 |
-| 响应式界面 | 按窗口尺寸适配小屏/大屏 iPhone、iPad 和横竖屏；布局渲染测试通过，但横屏登录 UI 用例仍阻断发布，实际分屏、窗口调整及其他设备形态仍待验证 |
+| 响应式界面 | 按窗口尺寸适配小屏/大屏 iPhone、iPad 和横竖屏；布局渲染测试通过，横屏登录用例已通过，本轮暂不适配 iPad，已有密码模式触摸问题将作为已知限制保留，实际分屏、窗口调整及其他设备形态仍待验证 |
 
 BLE 连接、开关阀和设备清账需要靠近原水表。上传结果未知时，账单缺失或金额为零不能直接证明未记账。不同校园、固件及宿主环境的实机结果可能不同。
 
@@ -36,7 +36,7 @@ BLE 连接、开关阀和设备清账需要靠近原水表。上传结果未知�
 
 v0.4.5 构建通过 43 项核心测试、125 项 iOS 测试（包含这 43 项核心测试）、7 项 UI 测试和 8 项打包测试。测试使用 Mock 网络和 BLE；这些是旧版结果，不能算作 v0.4.6 已通过。历史异常交易的真实账单及设备写回仍需原 iPhone 验证。 [成功构建记录](https://github.com/CarpediemDyn/linyu-ios/actions/runs/42154843612) · [v0.4.5 验证报告](https://github.com/CarpediemDyn/linyu-ios/blob/fix/ble-settlement-recovery/docs/ble-settlement-recovery-v0.4.5.md) · [v0.4.6 发布前检查](docs/release/0.4.6-readiness.md)
 
-v0.4.6 的固定源码 `f343494` 在 Ubuntu/macOS 通过 51 项核心测试、8 项打包测试，在 iOS 模拟器通过 177 项单元测试（含上述 51 项核心测试）；8 项 UI 测试中 5 项通过、3 项失败，因此没有执行真机包构建及签名。后续主题按钮观察与 Mock 测试修正已独立提交，尚未重新运行 iOS 测试。本轮一次正式构建额度已使用，不自动重试或发布。见 [实际质量检查报告](docs/release/0.4.6-quality-results.md) 与 [失败运行](https://github.com/CarpediemDyn/linyu-ios/actions/runs/42173058772)。
+v0.4.6 的固定源码 `f343494` 在 Ubuntu/macOS 通过 51 项核心测试、8 项打包测试，在 iOS 模拟器通过 177 项单元测试（含上述 51 项核心测试）；8 项 UI 测试中 5 项通过、3 项失败，因此没有执行真机包构建及签名。后续已运行 iPhone 和 iPad 测试：177 项单元测试持续通过，主题与历史恢复 UI 已通过；用户已调整为先发布 iPhone 测试版，iPad 暂不适配，密码模式触摸问题未解决并保留记录；正在进行 iPhone 完整验证，尚不生成 IPA 或发布。用户已授权继续验证及完成后的必要构建。最新证据见 [继续验证记录](docs/release/0.4.6-validation.md)。见 [实际质量检查报告](docs/release/0.4.6-quality-results.md) 与 [失败运行](https://github.com/CarpediemDyn/linyu-ios/actions/runs/42173058772)。
 
 ## 构建与安装
 

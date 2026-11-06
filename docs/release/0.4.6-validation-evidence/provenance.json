@@ -1,0 +1,23 @@
+[
+  {
+    "file": "narrow-windows.png",
+    "source_commit": "dfd8ca258ce24c1a5c0372a9277ed992d5c9a1f1",
+    "run_id": 42183540880,
+    "sha256": "dc1a40a16f7fa8b8269486cb985eeb8dd15ede0e32f3b9e8956519bed744eb2c",
+    "processing": "Actual Mock screenshots/recorded frames, scaled and arranged; no interpolated frames"
+  },
+  {
+    "file": "wide-windows.png",
+    "source_commit": "dfd8ca258ce24c1a5c0372a9277ed992d5c9a1f1",
+    "run_id": 42183540880,
+    "sha256": "ace335d4ca1b9bdc5db6c1c66e4569736c7c2163c5f46f843abf4c7f972cea9c",
+    "processing": "Actual Mock screenshots/recorded frames, scaled and arranged; no interpolated frames"
+  },
+  {
+    "file": "theme-recorded-frames.png",
+    "source_commit": "f3434949f1c23aac5eb1f3135ceee8527e53934a",
+    "run_id": 42173058772,
+    "sha256": "d861d61f682d2633668f0e1e14ebb3e25d0fc2c740c8a051bc923b059e01ca7f",
+    "processing": "Actual Mock screenshots/recorded frames, scaled and arranged; no interpolated frames"
+  }
+]

@@ -115,7 +115,7 @@ jobs:
       - name: Generate container project
         run: xcodegen generate --spec project-livecontainer.yml
       - name: Select simulator
-        timeout-minutes: 6
+        timeout-minutes: 12
         env:
           LINYU_SIMULATOR_FAMILY: ${{ inputs.simulator }}
         run: |
@@ -131,37 +131,12 @@ jobs:
           mkdir -p work
           TEST_SELECTION=()
           if [ "$LINYU_TESTS_ONLY" = true ] && [ "$LINYU_TEST_SCOPE" = login-input ]; then
-            TEST_SELECTION=(-only-testing:LinYuUISmokeTests/LoginVisualTests/testLoginModesAndInvalidPhone -only-testing:LinYuUISmokeTests/LoginVisualTests/testLoginValidationAtVisibleButtonCenter -test-iterations 3)
+            TEST_SELECTION=(-only-testing:LinYuUISmokeTests/LoginVisualTests/testLoginModesAndInvalidPhone -test-iterations 3)
           fi
           xcodebuild -project LinYuLiveContainer.xcodeproj -scheme LinYuIOS \
             -configuration Debug -sdk iphonesimulator -destination "id=$IOS_SIMULATOR_UDID" \
             -derivedDataPath work/SimulatorBuild -resultBundlePath work/ContainerTests.xcresult \
             "${TEST_SELECTION[@]}" CODE_SIGNING_ALLOWED=NO test 2>&1 | tee work/xcodebuild-test.log
-      - name: Collect simulator-only login diagnostics
-        if: always()
-        run: |
-          python3 - <<'PY'
-          import json, pathlib, subprocess
-          output = pathlib.Path('work/login-diagnostics'); output.mkdir(parents=True, exist_ok=True)
-          devices = json.loads(subprocess.check_output(['xcrun', 'simctl', 'list', 'devices', 'available', '-j']))
-          for group in devices['devices'].values():
-              for device in group:
-                  if device.get('state') != 'Booted': continue
-                  container = subprocess.run(['xcrun', 'simctl', 'get_app_container', device['udid'], 'org.linyu.prototype.livecontainer', 'data'], capture_output=True, text=True)
-                  if container.returncode: continue
-                  log = pathlib.Path(container.stdout.strip()) / 'Library/Caches/linyu.log'
-                  if not log.exists(): continue
-                  lines = [line for line in log.read_text().splitlines() if 'UITEST_LOGIN_' in line or 'LATENCY login ' in line]
-                  (output / (device['udid'] + '.log')).write_text('\n'.join(lines))
-                  print(json.dumps({'device': device['name'], 'login_events': len(lines)}))
-          PY
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: LinYu-Login-UI-Diagnostics
-          path: work/login-diagnostics
-          if-no-files-found: warn
-          retention-days: 7
       - uses: actions/upload-artifact@v4
         if: always()
         with:

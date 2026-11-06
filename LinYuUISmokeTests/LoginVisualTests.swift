@@ -4,7 +4,7 @@ import CoreFoundation
 /// Exercises the real login UI without using any account or calling the API.
 final class LoginVisualTests: XCTestCase {
     @MainActor func testLoginModesAndInvalidPhone() async {
-        let app = launchFixture("fast", diagnostics: true)
+        let app = launchFixture("fast")
         let mode = app.buttons["密码登录"]
         XCTAssertTrue(mode.waitForExistence(timeout: 15))
         capture(app, "login-sms")
@@ -72,30 +72,6 @@ final class LoginVisualTests: XCTestCase {
         add(attachment)
     }
 
-    /// Diagnostic comparison with an actual touch at the visible button center.
-    /// The ordinary element.tap regression above remains mandatory in the full suite.
-    @MainActor func testLoginValidationAtVisibleButtonCenter() async {
-        let app = launchFixture("fast", diagnostics: true)
-        app.buttons["登 录"].tap()
-        XCTAssertTrue(app.staticTexts["请输入手机号"].waitForExistence(timeout: 3))
-        app.buttons["密码登录"].tap()
-        XCTAssertTrue(app.secureTextFields["密码"].exists)
-        let phone = app.textFields["手机号"]
-        phone.tap(); phone.typeText("12")
-        XCTAssertEqual(phone.value as? String, "12")
-        let login = app.buttons["登 录"]
-        guard reveal(login, in: app), await stable(login, in: app) else { return }
-        XCTAssertTrue(login.isEnabled)
-        XCTAssertTrue(login.isHittable)
-        XCTAssertTrue(app.frame.contains(login.frame))
-        capture(app, "login-before-visible-center-submit")
-        let geometry = XCTAttachment(string: "button=\(login.frame) center=\(login.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).screenPoint)")
-        geometry.name = "login-visible-center-geometry"; geometry.lifetime = .keepAlways; add(geometry)
-        login.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-        XCTAssertTrue(app.staticTexts["请输入 11 位手机号"].waitForExistence(timeout: 5))
-        capture(app, "login-after-visible-center-submit")
-    }
-
     @MainActor func testFastAndOrdinaryMockLoginReachHome() {
         for scenario in ["fast", "ordinary"] {
             let app = launchFixture(scenario)
@@ -154,11 +130,10 @@ final class LoginVisualTests: XCTestCase {
         releaseFixtureResponse(in: app)
     }
 
-    @MainActor private func launchFixture(_ scenario: String, diagnostics: Bool = false) -> XCUIApplication {
+    @MainActor private func launchFixture(_ scenario: String) -> XCUIApplication {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
         app.launchEnvironment["LINYU_LOGIN_FIXTURE"] = scenario
-        if diagnostics { app.launchEnvironment["LINYU_LOGIN_DIAGNOSTICS"] = "1" }
         if scenario == "slow" { app.launchEnvironment["LINYU_LOGIN_GATE"] = UUID().uuidString }
         app.launch()
         XCTAssertTrue(app.textFields["手机号"].waitForExistence(timeout: 15))

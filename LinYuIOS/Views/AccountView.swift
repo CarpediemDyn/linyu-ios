@@ -114,9 +114,6 @@ import SwiftUI
             .disabled(!canSubmitLogin)
             .accessibilityLabel("登 录")
             .accessibilityValue(loggingIn ? "正在登录" : "")
-#if targetEnvironment(simulator)
-            .background(LoginHitProbe(token: "\(usePassword)-\(phone.count)-\(error != nil)"))
-#endif
             .padding(.top, compact ? 14 : 24)
             if let error {
                 Text(error).font(LinYuType.font(13)).foregroundStyle(Color(linYuHex: 0xC62828)).multilineTextAlignment(.center)
@@ -136,11 +133,6 @@ import SwiftUI
         return true
     }
     private func login() {
-#if targetEnvironment(simulator)
-        if ProcessInfo.processInfo.environment["LINYU_LOGIN_DIAGNOSTICS"] == "1" {
-            OriginalLogs.shared.add("UITEST_LOGIN_ACTION mode=\(usePassword ? "password" : "sms") phone_length=\(phone.count) ready=\(canSubmitLogin)")
-        }
-#endif
         let trace = OriginalLogs.shared.trace("login")
         trace.mark("tap")
         guard canSubmitLogin else { trace.finish("busy"); return }
@@ -211,48 +203,10 @@ private struct LoginSubmitButtonStyle: ButtonStyle {
                     .overlay(shape.fill(.white.opacity(pressed ? 0.12 : 0)))
                     .shadow(color: .black.opacity(isEnabled && !pressed ? 0.22 : 0), radius: 4, y: 3)
             }
-            .onChange(of: configuration.isPressed) { pressed in
-#if targetEnvironment(simulator)
-                if ProcessInfo.processInfo.environment["LINYU_LOGIN_DIAGNOSTICS"] == "1" {
-                    Task { @MainActor in OriginalLogs.shared.add("UITEST_LOGIN_PRESS pressed=\(pressed)") }
-                }
-#endif
-            }
     }
 }
 
 private enum OriginalLoginFieldKind: Hashable { case phone, password, code }
-#if targetEnvironment(simulator)
-/// Test-only native hit-path evidence. Never includes entered text or credentials.
-private struct LoginHitProbe: UIViewRepresentable {
-    let token: String
-    final class Coordinator { var token = "" }
-    func makeCoordinator() -> Coordinator { Coordinator() }
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView(); view.isUserInteractionEnabled = false; return view
-    }
-    func updateUIView(_ view: UIView, context: Context) {
-        guard ProcessInfo.processInfo.environment["LINYU_LOGIN_DIAGNOSTICS"] == "1",
-              context.coordinator.token != token else { return }
-        context.coordinator.token = token
-        DispatchQueue.main.async {
-            guard let window = view.window else { return }
-            let rect = view.convert(view.bounds, to: window)
-            let center = CGPoint(x: rect.midX, y: rect.midY)
-            for candidate in window.windowScene?.windows ?? [window] where !candidate.isHidden {
-                let point = window.convert(center, to: candidate)
-                var hit = candidate.hitTest(point, with: nil)
-                var path: [String] = []
-                while let current = hit, path.count < 8 {
-                    path.append("\(type(of: current)):\(current.frame)")
-                    hit = current.superview
-                }
-                OriginalLogs.shared.add("UITEST_LOGIN_HIT token=\(token) button=\(rect) window=\(type(of: candidate)) level=\(candidate.windowLevel.rawValue) path=\(path.joined(separator: ">"))")
-            }
-        }
-    }
-}
-#endif
 private struct OriginalLoginField: View {
     let title: String
     @Binding var text: String
