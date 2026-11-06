@@ -2,7 +2,7 @@ import SwiftUI
 
 @MainActor struct ContentView: View {
     var body: some View {
-#if DEBUG && targetEnvironment(simulator)
+#if targetEnvironment(simulator)
         OriginalRootView(model: LoginFeedbackFixture.model())
 #else
         OriginalRootView()

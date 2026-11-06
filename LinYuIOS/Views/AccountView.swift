@@ -11,9 +11,11 @@ import SwiftUI
     @State private var countdown = 0
     @State private var countdownGeneration = UUID()
     @State private var sending = false
-    @State private var loggingIn = false
+    @State private var loginFeedback: LatencyTrace?
     @State private var appeared = false
     private let blue = Color(linYuHex: 0x1A73E8)
+    private var loggingIn: Bool { loginFeedback != nil }
+    private var canSubmitLogin: Bool { !loggingIn && !sending && !auth.loading }
 
     var body: some View {
         GeometryReader { geometry in
@@ -56,24 +58,27 @@ import SwiftUI
                         OriginalLoginField(title: "验证码", text: $smsCode, kind: .code)
                         Button(action: sendCode) { Text(countdown > 0 ? "\(countdown)s" : "发送").font(LinYuType.font(13)).lineLimit(1).frame(width: 84, height: 40) }
                             .foregroundStyle(.white).background(sending || countdown > 0 ? Color(linYuHex: 0x90CAF9) : blue, in: RoundedRectangle(cornerRadius: 14))
-                            .buttonStyle(.plain).disabled(sending || countdown > 0 || auth.loading)
+                            .buttonStyle(.plain).disabled(!canSubmitLogin || countdown > 0)
                     }
                 }
             }.padding(.top, 14).disabled(loggingIn)
             Button(action: login) {
                 Group {
-                    if loggingIn {
-                        HStack(spacing: 8) {
-                            ProgressView().tint(.white).frame(width: 22, height: 22)
-                            Text("正在登录…").font(LinYuType.font(17, weight: .bold))
-                        }
-                    } else { Text("登 录").font(LinYuType.font(17, weight: .bold)) }
+                    if let loginFeedback {
+                        ProgressView()
+                            .tint(Color(linYuHex: 0x0D47A1))
+                            .frame(width: 22, height: 22)
+                            .onAppear { loginFeedback.mark("feedback_view_appeared") }
+                    } else {
+                        Text("登 录").font(LinYuType.font(17, weight: .bold))
+                    }
                 }.frame(maxWidth: .infinity).frame(height: 52)
-            }.buttonStyle(.plain).foregroundStyle(.white)
-                .background {
-                    RoundedRectangle(cornerRadius: 14, style: .circular).fill(loggingIn ? Color(linYuHex: 0x90CAF9) : blue)
-                        .shadow(color: .black.opacity(0.22), radius: 4, y: 3)
-                }.disabled(loggingIn || auth.loading).padding(.top, 24)
+            }
+            .buttonStyle(LoginSubmitButtonStyle(blue: blue))
+            .disabled(!canSubmitLogin)
+            .accessibilityLabel("登 录")
+            .accessibilityValue(loggingIn ? "正在登录" : "")
+            .padding(.top, 24)
             if let error {
                 Text(error).font(LinYuType.font(13)).foregroundStyle(Color(linYuHex: 0xC62828)).multilineTextAlignment(.center)
                     .padding(12).background(Color(linYuHex: 0xFFEBEE), in: RoundedRectangle(cornerRadius: 8)).padding(.top, 16)
@@ -94,7 +99,7 @@ import SwiftUI
     private func login() {
         let trace = OriginalLogs.shared.trace("login")
         trace.mark("tap")
-        guard !loggingIn, !sending, !auth.loading else { trace.finish("busy"); return }
+        guard canSubmitLogin else { trace.finish("busy"); return }
         guard validPhone() else { trace.finish("invalid_input"); return }
         let mode = usePassword
         let secret = mode ? password : smsCode
@@ -109,17 +114,17 @@ import SwiftUI
             return
         }
         let number = phone
-        loggingIn = true; error = nil; auth.activity = ""
+        loginFeedback = trace; error = nil; auth.activity = ""
         trace.mark("feedback_requested")
         Task {
             await auth.login(phone: number, secret: secret, usePassword: mode, trace: trace)
             if mode { password = "" } else { smsCode = "" }
-            loggingIn = false
+            loginFeedback = nil
             if auth.session == nil { error = loginError(auth.activity) }
         }
     }
     private func sendCode() {
-        guard validPhone(), !sending, countdown == 0, !auth.loading else { return }
+        guard canSubmitLogin, countdown == 0, validPhone() else { return }
         sending = true; error = nil; auth.activity = ""; countdown = 60
         let token = UUID(); countdownGeneration = token
         Task {
@@ -143,6 +148,26 @@ import SwiftUI
         if lower.contains("timed out") || lower.contains("timeout") { return "连接超时，请检查网络后重试" }
         if lower.contains("resolve host") || lower.contains("no address associated") || lower.contains("network is unreachable") || lower.contains("internet connection") { return "网络连接失败，请检查网络设置" }
         return value.isEmpty ? "登录失败" : value
+    }
+}
+
+/// Material's pressed state layer stays within the original 14 dp shape.
+private struct LoginSubmitButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    let blue: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        let pressed = isEnabled && configuration.isPressed
+        let shape = RoundedRectangle(cornerRadius: 14)
+        return configuration.label
+            .foregroundStyle(isEnabled ? Color.white : Color(linYuHex: 0x0D47A1))
+            .background {
+                shape
+                    .fill(isEnabled ? blue : Color(linYuHex: 0x90CAF9))
+                    .overlay(shape.fill(.white.opacity(pressed ? 0.12 : 0)))
+                    .shadow(color: .black.opacity(isEnabled && !pressed ? 0.22 : 0), radius: 4, y: 3)
+            }
+            .contentShape(shape)
     }
 }
 

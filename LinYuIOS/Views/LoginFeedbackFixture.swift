@@ -1,6 +1,5 @@
-#if DEBUG && targetEnvironment(simulator)
+#if targetEnvironment(simulator)
 import Foundation
-import SwiftUI
 
 /// Drives the real login and home views from XCUITest without a real account.
 @MainActor enum LoginFeedbackFixture {

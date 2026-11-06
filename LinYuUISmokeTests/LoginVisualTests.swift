@@ -88,7 +88,7 @@ final class LoginVisualTests: XCTestCase {
     @MainActor private func enterCredentials(in app: XCUIApplication) -> XCUIElement {
         let phone = app.textFields["手机号"]
         phone.tap()
-        phone.typeText("13800138000")
+        phone.typeText("00000000000")
         let code = app.textFields["验证码"]
         code.tap()
         code.typeText("123456")
