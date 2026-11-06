@@ -262,19 +262,9 @@ struct LinYuPillNavigation: View {
 
 @MainActor struct OriginalBackground: View {
     @ObservedObject var preferences: OriginalPreferences
-    @Environment(\.linYuColors) private var colors
     let shower: Bool
     var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                colors.background
-                let path = shower ? preferences.showerBackground : preferences.homeBackground
-                if !path.isEmpty, let image = OriginalBackgroundPalette.background(path: path, asset: "", brightness: preferences.backgroundBrightness(shower: shower)) {
-                    Image(uiImage: image).resizable().scaledToFill()
-                        .frame(width: geometry.size.width, height: geometry.size.height)
-                        .opacity(preferences.backgroundOpacity(shower: shower)).blur(radius: preferences.backgroundBlur(shower: shower))
-                }
-            }.frame(width: geometry.size.width, height: geometry.size.height).clipped()
-        }.ignoresSafeArea(.container).allowsHitTesting(false).accessibilityHidden(true)
+        BackgroundCanvas(preferences: preferences, scope: shower ? .shower : .home)
+            .ignoresSafeArea(.container).allowsHitTesting(false).accessibilityHidden(true)
     }
 }

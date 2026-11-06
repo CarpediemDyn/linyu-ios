@@ -14,45 +14,58 @@ import UIKit
     @Published var trendEnabled: Bool { didSet { defaults.set(trendEnabled, forKey: "trendEnabled") } }
     @Published var trendRange: String { didSet { defaults.set(trendRange, forKey: "trendRange") } }
     @Published var trendType: String { didSet { defaults.set(trendType, forKey: "trendChartType") } }
-    @Published var backgroundScope = "home" {
-        didSet {
-            opacity = load("opacity", scope: backgroundScope, fallback: 1)
-            blur = load("blur", scope: backgroundScope, fallback: 0)
-            brightness = load("brightness", scope: backgroundScope, fallback: 1)
-        }
+    @Published private(set) var homeBackgroundConfig: BackgroundConfiguration
+    @Published private(set) var showerBackgroundConfig: BackgroundConfiguration
+    @Published var backgroundSelection: BackgroundScope { didSet { defaults.set(backgroundSelection.rawValue, forKey: "backgroundScope") } }
+    enum BackgroundImportState: Equatable { case loading, failed(String) }
+    @Published private(set) var backgroundImports: [BackgroundScope: BackgroundImportState] = [:]
+    let backgroundImages: BackgroundImageStore
+    let backgroundDirectory: URL
+    struct BackgroundImportHandle { let id: UUID; let completion: Task<Void, Never> }
+    private var backgroundJobs: [BackgroundScope: BackgroundImportHandle] = [:]
+
+    // Compatibility accessors read one config; changing the selection never writes its effects.
+    var backgroundScope: String {
+        get { backgroundSelection.rawValue }
+        set { backgroundSelection = BackgroundScope(rawValue: newValue) ?? .home }
     }
-    @Published var homeBackground: String { didSet { defaults.set(homeBackground, forKey: "homeBackground") } }
-    @Published var showerBackground: String { didSet { defaults.set(showerBackground, forKey: "showerBackground") } }
-    @Published private(set) var homeThemeRGB: Int?
-    @Published private(set) var showerThemeRGB: Int?
-    var accentColor: Color {
-        guard let rgb = homeThemeRGB else { return Color(linYuHex: theme == "dark" ? 0x58A6FF : 0x2563EB) }
-        return Color(red: Double((rgb >> 16) & 255) / 255, green: Double((rgb >> 8) & 255) / 255, blue: Double(rgb & 255) / 255)
+    var homeBackground: String { backgroundURL(for: .home)?.path ?? "" }
+    var showerBackground: String { backgroundURL(for: .shower)?.path ?? "" }
+    var homeThemeRGB: Int? { homeBackgroundConfig.enabled ? homeBackgroundConfig.themeColor : nil }
+    var showerThemeRGB: Int? { showerBackgroundConfig.enabled ? showerBackgroundConfig.themeColor : nil }
+    var accentColor: Color { Color(linYuHex: UInt32(homeThemeRGB ?? (theme == "dark" ? 0x58A6FF : 0x2563EB))) }
+    var opacity: Double {
+        get { configuration(for: backgroundSelection).opacity }
+        set { setEffect(newValue, at: \.opacity, scope: backgroundSelection) }
     }
-    @Published var opacity: Double { didSet { defaults.set(opacity, forKey: "background.\(backgroundScope).opacity") } }
-    @Published var blur: Double { didSet { defaults.set(blur, forKey: "background.\(backgroundScope).blur") } }
-    @Published var brightness: Double { didSet { defaults.set(brightness, forKey: "background.\(backgroundScope).brightness") } }
+    var blur: Double {
+        get { configuration(for: backgroundSelection).blur }
+        set { setEffect(newValue, at: \.blur, scope: backgroundSelection) }
+    }
+    var brightness: Double {
+        get { configuration(for: backgroundSelection).brightness }
+        set { setEffect(newValue, at: \.brightness, scope: backgroundSelection) }
+    }
     @Published var cardOrder: [String] { didSet { defaults.set(cardOrder, forKey: "profileCardOrder") } }
     @Published var hiddenCards: Set<String> { didSet { defaults.set(Array(hiddenCards), forKey: "profileHiddenCards") } }
     @Published var settingsOrder: [String] { didSet { defaults.set(settingsOrder, forKey: "settingsCardOrder") } }
     @Published var hiddenSettings: Set<String> { didSet { defaults.set(Array(hiddenSettings), forKey: "settingsHiddenCards") } }
     static let profileCards = ["账号信息", "使用码", "绑定寝室"]
     static let settingsCards = ["通知", "消费趋势", "背景装扮", "运行日志", "关于项目", "软件更新"]
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, backgroundDirectory: URL? = nil) {
         self.defaults = defaults
+        let directory = backgroundDirectory ?? URL.applicationSupportDirectory.appendingPathComponent("Backgrounds", isDirectory: true)
+        self.backgroundDirectory = directory
+        backgroundImages = BackgroundImageStore(directory: directory)
+        homeBackgroundConfig = .restore(scope: .home, defaults: defaults, directory: directory)
+        showerBackgroundConfig = .restore(scope: .shower, defaults: defaults, directory: directory)
+        backgroundSelection = BackgroundScope(rawValue: defaults.string(forKey: "backgroundScope") ?? "") ?? .home
         theme = defaults.string(forKey: "themeMode") ?? "light"
         func flag(_ key: String) -> Bool { defaults.object(forKey: key) as? Bool ?? true }
         notifyEnabled = flag("notifyEnabled"); notifyInUse = flag("notifyInUse")
         notifyFinished = flag("notifyFinished"); notifyAutoClose = flag("notifyAutoClose"); notifyAlert = flag("notifyAlert")
         trendEnabled = flag("trendEnabled"); trendRange = defaults.string(forKey: "trendRange") ?? "LAST_7_DAYS"
         trendType = defaults.string(forKey: "trendChartType") ?? "LINE"
-        homeBackground = defaults.string(forKey: "homeBackground") ?? ""
-        showerBackground = defaults.string(forKey: "showerBackground") ?? ""
-        homeThemeRGB = defaults.object(forKey: "background.home.themeRGB") as? Int
-        showerThemeRGB = defaults.object(forKey: "background.shower.themeRGB") as? Int
-        opacity = defaults.object(forKey: "background.home.opacity") as? Double ?? defaults.object(forKey: "backgroundOpacity") as? Double ?? 1
-        blur = defaults.object(forKey: "background.home.blur") as? Double ?? defaults.object(forKey: "backgroundBlur") as? Double ?? 0
-        brightness = defaults.object(forKey: "background.home.brightness") as? Double ?? 1
         let known = Set(Self.profileCards + Self.settingsCards)
         var assigned = Set<String>()
         var profile = (defaults.stringArray(forKey: "profileCardOrder") ?? []).filter { known.contains($0) && assigned.insert($0).inserted }
@@ -64,40 +77,107 @@ import UIKit
         settingsOrder = settings
         hiddenSettings = Set(defaults.stringArray(forKey: "settingsHiddenCards") ?? [])
     }
-    private func load(_ key: String, scope: String, fallback: Double) -> Double {
-        defaults.object(forKey: "background.\(scope).\(key)") as? Double ?? fallback
+    func configuration(for scope: BackgroundScope) -> BackgroundConfiguration {
+        scope == .home ? homeBackgroundConfig : showerBackgroundConfig
     }
-    func backgroundOpacity(shower: Bool) -> Double { let scope = shower ? "shower" : "home"; return scope == backgroundScope ? opacity : load("opacity", scope: scope, fallback: 1) }
-    func backgroundBlur(shower: Bool) -> Double { let scope = shower ? "shower" : "home"; return scope == backgroundScope ? blur : load("blur", scope: scope, fallback: 0) }
-    func backgroundBrightness(shower: Bool) -> Double { let scope = shower ? "shower" : "home"; return scope == backgroundScope ? brightness : load("brightness", scope: scope, fallback: 1) }
-    func setBackground(_ data: Data, scope: String) throws {
-        guard let image = OriginalBackgroundPalette.importedImage(data), let encoded = image.jpegData(compressionQuality: 0.95) else {
-            throw WaterError.invalid("无法读取所选背景图片")
+
+    func backgroundURL(for scope: BackgroundScope) -> URL? {
+        let config = configuration(for: scope)
+        guard config.enabled, !config.imageFile.isEmpty else { return nil }
+        if config.imageFile.hasPrefix("/") { return URL(fileURLWithPath: config.imageFile) }
+        guard config.imageFile == URL(fileURLWithPath: config.imageFile).lastPathComponent else { return nil }
+        return backgroundDirectory.appendingPathComponent(config.imageFile)
+    }
+
+    func backgroundOpacity(shower: Bool) -> Double { configuration(for: shower ? .shower : .home).opacity }
+    func backgroundBlur(shower: Bool) -> Double { configuration(for: shower ? .shower : .home).blur }
+    func backgroundBrightness(shower: Bool) -> Double { configuration(for: shower ? .shower : .home).brightness }
+
+    func backgroundBinding(_ path: WritableKeyPath<BackgroundConfiguration, Double>, scope: BackgroundScope) -> Binding<Double> {
+        Binding(get: { self.configuration(for: scope)[keyPath: path] },
+                set: { self.setEffect($0, at: path, scope: scope) })
+    }
+
+    private func setEffect(_ value: Double, at path: WritableKeyPath<BackgroundConfiguration, Double>, scope: BackgroundScope) {
+        var config = configuration(for: scope)
+        config[keyPath: path] = value
+        saveBackground(config, scope: scope)
+    }
+
+    private func saveBackground(_ value: BackgroundConfiguration, scope: BackgroundScope) {
+        var config = value
+        config.normalize()
+        guard let data = try? JSONEncoder().encode(config) else { return }
+        defaults.set(data, forKey: "background.config.v2." + scope.rawValue)
+        if scope == .home { homeBackgroundConfig = config } else { showerBackgroundConfig = config }
+    }
+
+    /// Captures the destination before the picker/iCloud read yields. New imports and reset
+    /// invalidate the previous job; only the current job may commit the saved file/config.
+    @discardableResult
+    func beginBackgroundImport(scope: BackgroundScope, load: @escaping @MainActor () async throws -> URL?) -> BackgroundImportHandle {
+        cancelBackgroundImport(scope: scope)
+        let id = UUID()
+        let task = Task { [weak self] in
+            guard let self else { return }
+            let started = DispatchTime.now().uptimeNanoseconds
+            var staged: URL?
+            defer { if let staged { BackgroundPhoto.removeStaged(staged) } }
+            do {
+                OriginalLogs.shared.add("BACKGROUND import_started scope=\(scope.rawValue)")
+                staged = try await load()
+                try Task.checkCancellation()
+                guard let staged else { throw BackgroundImageStore.Failure.photoUnavailable }
+                let image = try await self.backgroundImages.prepare(source: staged, scope: scope)
+                guard !Task.isCancelled, self.backgroundJobs[scope]?.id == id else {
+                    await self.backgroundImages.removeOwnedImage(at: self.backgroundDirectory.appendingPathComponent(image.fileName))
+                    return
+                }
+                let previous = self.backgroundURL(for: scope)
+                var config = BackgroundConfiguration()
+                config.enabled = true
+                config.imageFile = image.fileName
+                config.themeColor = image.themeColor
+                self.saveBackground(config, scope: scope)
+                let total = (DispatchTime.now().uptimeNanoseconds - started) / 1_000_000
+                OriginalLogs.shared.add("BACKGROUND import_completed scope=\(scope.rawValue) processing=\(image.durationMilliseconds)ms total=\(total)ms")
+                await self.backgroundImages.removeOwnedImage(at: previous)
+                if self.backgroundJobs[scope]?.id == id {
+                    self.backgroundJobs[scope] = nil
+                    self.backgroundImports[scope] = nil
+                }
+            } catch {
+                guard self.backgroundJobs[scope]?.id == id else { return }
+                self.backgroundJobs[scope] = nil
+                if error is CancellationError || Task.isCancelled { self.backgroundImports[scope] = nil }
+                else {
+                    let message = (error as? BackgroundImageStore.Failure)?.localizedDescription
+                        ?? BackgroundImageStore.Failure.photoUnavailable.localizedDescription
+                    self.backgroundImports[scope] = .failed(message)
+                    OriginalLogs.shared.add("BACKGROUND import_failed scope=\(scope.rawValue)")
+                }
+            }
         }
-        let root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
-                                              appropriateFor: nil, create: true).appendingPathComponent("Backgrounds", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let file = root.appendingPathComponent(scope == "shower" ? "shower.image" : "home.image")
-        try encoded.write(to: file, options: .atomic)
-        if scope == "shower" { showerBackground = file.path } else { homeBackground = file.path }
-        resetTuning(scope: scope)
-        let rgb = OriginalBackgroundPalette.rgb(image: image)
-        setTheme(rgb, scope: scope)
+        let handle = BackgroundImportHandle(id: id, completion: task)
+        backgroundJobs[scope] = handle
+        backgroundImports[scope] = .loading
+        return handle
     }
-    func resetBackground(scope: String) {
-        if scope == "shower" { showerBackground = "" } else { homeBackground = "" }
-        resetTuning(scope: scope)
-        setTheme(nil, scope: scope)
+
+    func cancelBackgroundImport(scope: BackgroundScope, matching id: UUID? = nil) {
+        guard let job = backgroundJobs[scope], id == nil || job.id == id else { return }
+        backgroundJobs[scope] = nil
+        job.completion.cancel()
+        backgroundImports[scope] = nil
     }
-    private func resetTuning(scope: String) {
-        defaults.set(1.0, forKey: "background.\(scope).opacity")
-        defaults.set(0.0, forKey: "background.\(scope).blur")
-        defaults.set(1.0, forKey: "background.\(scope).brightness")
-        if backgroundScope == scope { opacity = 1; blur = 0; brightness = 1 }
-    }
-    private func setTheme(_ rgb: Int?, scope: String) {
-        if scope == "shower" { showerThemeRGB = rgb } else { homeThemeRGB = rgb }
-        if let rgb { defaults.set(rgb, forKey: "background.\(scope).themeRGB") }
-        else { defaults.removeObject(forKey: "background.\(scope).themeRGB") }
+
+    func resetBackground(scope raw: String) { resetBackground(scope: BackgroundScope(rawValue: raw) ?? .home) }
+
+    func resetBackground(scope: BackgroundScope) {
+        cancelBackgroundImport(scope: scope)
+        let previous = backgroundURL(for: scope)
+        saveBackground(BackgroundConfiguration(), scope: scope)
+        backgroundImports[scope] = nil
+        Task { await backgroundImages.removeOwnedImage(at: previous) }
     }
 }

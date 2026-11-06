@@ -17,6 +17,9 @@ import SwiftUI
     private var settling: Bool { model.settlingBluetooth.map { $0 == model.showShower } ?? false }
     private var closeUnconfirmed: Bool { model.unconfirmedBluetoothClose.map { $0 == model.showShower } ?? false }
     private var hasCustomBackground: Bool { !model.preferences.showerBackground.isEmpty }
+    private var backgroundPalette: LinYuPalette {
+        LinYuPalette(isDark: colors.isDark, customAccent: model.preferences.showerThemeRGB)
+    }
 
     private var device: CampusDevice? {
         guard let serial = record?.binding.device.snCode ?? order?.snCode else { return nil }
@@ -56,6 +59,8 @@ import SwiftUI
             }
         }
         .linYuModal(isPresented: confirmingStop) { endUseDialog }
+        .environment(\.linYuColors, backgroundPalette)
+        .tint(backgroundPalette.accent)
         .onAppear { model.showerAppeared() }
         .interactiveDismissDisabled(stopping)
         .accessibilityAction(.escape) {
@@ -104,7 +109,7 @@ import SwiftUI
                 HStack(spacing: 8) {
                     Spacer(minLength: 0)
                     Button("取消") { stopConfirmation = nil }
-                        .buttonStyle(.plain).foregroundStyle(colors.accent).padding(.horizontal, 12)
+                        .buttonStyle(.plain).foregroundStyle(backgroundPalette.accent).padding(.horizontal, 12)
                     Button("结束使用") {
                         guard stopTarget == stopConfirmation else { stopConfirmation = nil; return }
                         stopConfirmation = nil

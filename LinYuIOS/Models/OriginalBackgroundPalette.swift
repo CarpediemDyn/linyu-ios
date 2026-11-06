@@ -1,13 +1,10 @@
 import UIKit
-import CoreImage
 import ImageIO
 
 /// BackgroundManager.extractThemeColor: 48×48, 32-step RGB histogram, original HSV bounds.
-@MainActor enum OriginalBackgroundPalette {
-    private static let images = NSCache<NSString, UIImage>()
-    private static let context = CIContext(options: [.cacheIntermediates: false])
+enum OriginalBackgroundPalette {
     static func importedImage(_ data: Data) -> UIImage? {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+        guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
               let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                 kCGImageSourceCreateThumbnailFromImageAlways: true,
                 kCGImageSourceCreateThumbnailWithTransform: true,
@@ -16,29 +13,15 @@ import ImageIO
               ] as CFDictionary) else { return nil }
         return UIImage(cgImage: thumbnail)
     }
-    static func background(path: String, asset: String, brightness: Double) -> UIImage? {
-        // assets/bg_*.png are reference screenshots, never interactive wallpaper.
-        guard !path.isEmpty, let sourceImage = UIImage(contentsOfFile: path) else { return nil }
-        let modified = (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
-        let imageKey = path.isEmpty ? asset : path + ":" + String(modified)
-        let gain = max(0, brightness)
-        let key = (imageKey + ":gain:" + String(gain)) as NSString
-        if let cached = images.object(forKey: key) { return cached }
-        let image = sourceImage
-        images.countLimit = 12; images.totalCostLimit = 64 * 1024 * 1024
-        if gain == 1 {
-            images.setObject(image, forKey: key, cost: (image.cgImage?.bytesPerRow ?? 0) * (image.cgImage?.height ?? 0))
-            return image
-        }
-        guard gain != 1, let input = CIImage(image: image), let filter = CIFilter(name: "CIColorMatrix") else { return image }
-        filter.setValue(input, forKey: kCIInputImageKey)
-        filter.setValue(CIVector(x: CGFloat(gain), y: 0, z: 0, w: 0), forKey: "inputRVector")
-        filter.setValue(CIVector(x: 0, y: CGFloat(gain), z: 0, w: 0), forKey: "inputGVector")
-        filter.setValue(CIVector(x: 0, y: 0, z: CGFloat(gain), w: 0), forKey: "inputBVector")
-        guard let output = filter.outputImage, let cg = context.createCGImage(output, from: input.extent) else { return image }
-        let adjusted = UIImage(cgImage: cg)
-        images.setObject(adjusted, forKey: key, cost: cg.bytesPerRow * cg.height)
-        return adjusted
+    static func importedImage(at url: URL) -> UIImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+              let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: 2560,
+                kCGImageSourceShouldCacheImmediately: true
+              ] as CFDictionary) else { return nil }
+        return UIImage(cgImage: thumbnail)
     }
 
     static func rgb(image: UIImage) -> Int? {
@@ -46,7 +29,7 @@ import ImageIO
         var pixels = [UInt8](repeating: 0, count: 48 * 48 * 4)
         let rendered = pixels.withUnsafeMutableBytes { bytes -> Bool in
             guard let context = CGContext(data: bytes.baseAddress, width: 48, height: 48, bitsPerComponent: 8,
-                bytesPerRow: 48 * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bytesPerRow: 48 * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue) else { return false }
             context.interpolationQuality = .high
             context.draw(source, in: CGRect(x: 0, y: 0, width: 48, height: 48))
