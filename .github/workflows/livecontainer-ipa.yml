@@ -131,7 +131,7 @@ jobs:
           mkdir -p work
           TEST_SELECTION=()
           if [ "$LINYU_TESTS_ONLY" = true ] && [ "$LINYU_TEST_SCOPE" = login-input ]; then
-            TEST_SELECTION=(-only-testing:LinYuUISmokeTests/LoginVisualTests/testLoginModesAndInvalidPhone -test-iterations 3)
+            TEST_SELECTION=(-only-testing:LinYuUISmokeTests/LoginVisualTests/testLoginModesAndInvalidPhone -only-testing:LinYuUISmokeTests/LoginVisualTests/testLoginValidationAtVisibleButtonCenter -test-iterations 3)
           fi
           xcodebuild -project LinYuLiveContainer.xcodeproj -scheme LinYuIOS \
             -configuration Debug -sdk iphonesimulator -destination "id=$IOS_SIMULATOR_UDID" \
