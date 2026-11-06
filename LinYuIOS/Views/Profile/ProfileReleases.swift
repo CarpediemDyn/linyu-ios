@@ -141,18 +141,25 @@ struct ProfileRepository: Decodable {
         OriginalGlassCard {
             VStack(alignment: .leading, spacing: 0) {
                 ProfileCardTitle("关于项目")
-                Text("一款趣智校园第三方客户端").padding(.top, 10)
-                Text("项目名：淋浴（Hualala）" + (catalog.repository.map { " · ⭐ \($0.stars)" } ?? ""))
+                Text("LinYu iOS · 基于 LinYu 的 SwiftUI iOS 移植项目").padding(.top, 10)
+                Text("iOS 移植与维护：Cra3y").padding(.top, 6)
+                Text("Android 原版作者：\(owner)").padding(.top, 6)
+                Text("应用名称：淋浴（Hualala）" + (catalog.repository.map { " · 原版 ⭐ \($0.stars)" } ?? ""))
                     .padding(.top, 6)
-                Text("制作者：\(owner)").padding(.top, 6)
+                Text("第三方客户端，不代表校园官方服务").padding(.top, 6)
                 HStack(spacing: 0) {
-                    Text("联系方式：")
+                    Text("原版作者联系方式：")
                     Link("2276391153@qq.com", destination: URL(string: "mailto:2276391153@qq.com")!)
                         .foregroundStyle(colors.accent)
                 }
                 .padding(.top, 6)
+                Link(destination: URL(string: "https://github.com/CarpediemDyn/linyu-ios")!) {
+                    Text("访问 LinYu iOS 仓库").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(LinYuButtonStyle(cornerRadius: 12))
+                .padding(.top, 14)
                 Link(destination: catalog.repository?.page ?? ProfileReleaseCatalog.repositoryURL) {
-                    Text("访问 GitHub 仓库").frame(maxWidth: .infinity)
+                    Text("访问 Android 原版仓库").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(LinYuButtonStyle(cornerRadius: 12))
                 .padding(.top, 14)
