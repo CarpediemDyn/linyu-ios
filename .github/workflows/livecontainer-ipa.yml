@@ -1,8 +1,13 @@
 name: Build LiveContainer IPA
-run-name: ${{ inputs.preflight_only && 'Release preflight (no IPA)' || 'Build LiveContainer IPA' }}
+run-name: ${{ inputs.preflight_only && 'Release preflight (no IPA)' || inputs.tests_only && 'iOS regression tests (no IPA)' || 'Build LiveContainer IPA' }}
 on:
   workflow_dispatch:
     inputs:
+      tests_only:
+        description: Run all iOS tests without a device build, signing or IPA
+        type: boolean
+        required: true
+        default: true
       preflight_only:
         description: Run Ubuntu checks only; never allocate a Mac or generate an IPA
         type: boolean
@@ -122,11 +127,13 @@ jobs:
           path: work/visual-checks
           if-no-files-found: warn
       - name: Build physical iPhone app
+        if: ${{ !inputs.tests_only }}
         run: |
           xcodebuild -project LinYuLiveContainer.xcodeproj -scheme LinYuIOS \
             -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
             -derivedDataPath work/DeviceBuild ARCHS=arm64 ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO build
       - name: Ad-hoc seal and validate IPA
+        if: ${{ !inputs.tests_only }}
         run: |
           APP=work/DeviceBuild/Build/Products/Release-iphoneos/LinYuIOS.app
           /usr/bin/codesign --force --deep --sign - --timestamp=none "$APP"
@@ -135,6 +142,7 @@ jobs:
             --output work/deliverables/LinYu-LiveContainer.ipa --report work/deliverables/BUILD_REPORT.json
           git rev-parse HEAD > work/deliverables/SOURCE_COMMIT.txt
       - uses: actions/upload-artifact@v4
+        if: ${{ !inputs.tests_only }}
         with:
           name: LinYu-LiveContainer-IPA
           path: work/deliverables/*

@@ -162,6 +162,11 @@ final class LoginVisualTests: XCTestCase {
             }
         }
         if control.exists && control.isHittable { return true }
+        capture(app, "login-control-not-hittable")
+        let hierarchy = XCTAttachment(string: app.debugDescription)
+        hierarchy.name = "login-control-not-hittable-hierarchy"
+        hierarchy.lifetime = .keepAlways
+        add(hierarchy)
         XCTFail("The login control must remain reachable by normal scrolling: \(control)")
         return false
     }
