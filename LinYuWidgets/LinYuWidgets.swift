@@ -17,7 +17,7 @@ private struct WaterWidgetView: View {
             if #available(iOS 17.0, *) { content.containerBackground(.black.gradient, for: .widget) }
             else { content.padding(14).background(Color.black) }
         }.foregroundStyle(.white)
-            .widgetURL(entry.snapshot.orders.first.map { LinYuWidgetStorage.url(action: "stop", id: $0.id, snapshot: entry.snapshot) } ?? LinYuWidgetStorage.url(action: "start", id: entry.snapshot.lastDeviceID, snapshot: entry.snapshot))
+            .widgetURL(LinYuWidgetStorage.bodyURL(snapshot: entry.snapshot))
     }
     private var content: some View {
         VStack(alignment: .leading, spacing: 12) {

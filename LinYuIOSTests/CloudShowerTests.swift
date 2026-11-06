@@ -292,6 +292,65 @@ import XCTest
         XCTAssertEqual(CloudShowerController.consumeYuan(QzxyResponse(json: ["data": ["consumeMoney": 0]])), 0)
         XCTAssertEqual(CloudShowerController.consumeYuan(QzxyResponse(json: ["data": ["fee": 40]])), Decimal(string: "0.04"))
         XCTAssertNil(CloudShowerController.consumeYuan(QzxyResponse(json: ["data": ["consumeMoney": true]])))
+        for invalid in ["40pending", "NaN", "Infinity", "1e999"] {
+            XCTAssertNil(CloudShowerController.consumeYuan(QzxyResponse(json: ["data": ["consumeMoney": invalid]])))
+        }
+    }
+
+    func testContradictingProbeAndBillCannotSettleAnotherDevice() async throws {
+        let wrongProbe = Step(consume, json: ["success": true, "data": ["orderNo": "other", "deviceSnCode": "two", "consumeMoney": 990]])
+        let wrongBill = Step(bills, json: ["success": true, "data": [["consumeBillDTO": ["orderNo": "old", "deviceSnCode": "two", "consumeMoney": "9.99"]]]])
+        let (api, session) = fixture([
+            Step(using, json: ["success": false, "errorCode": 307, "data": ["orderNo": "old"]]),
+            Step(close, json: ["success": true]), wrongProbe, wrongProbe, wrongBill, wrongBill, wrongBill,
+            Step(consume, json: ["success": true, "data": ["orderNo": "old", "deviceSnCode": "one", "consumeMoney": 40]])
+        ])
+        defer { session.invalidateAndCancel() }
+        let manager = controller(api)
+        try await manager.open(snCode: "one", name: "A", mac: "AA", session: auth)
+        let order = try XCTUnwrap(manager.active.first)
+        try await manager.close(snCode: "one", session: auth)
+        await manager.refresh(session: auth)
+        XCTAssertNil(manager.settlementAmount(for: order))
+        await manager.refresh(session: auth)
+        XCTAssertEqual(manager.settlementAmount(for: order), Decimal(string: "0.04"), "Pending record must survive the mismatched response")
+    }
+
+    func testFailedProbeWithAmountCannotMarkSettlementComplete() async throws {
+        let failure = Step(consume, json: ["success": false, "data": ["consumeMoney": 990]])
+        let noBills = Step(bills, json: ["success": true, "data": []])
+        let (api, session) = fixture([
+            Step(using, json: ["success": false, "errorCode": 307, "data": ["orderNo": "old"]]),
+            Step(close, json: ["success": true]), failure, failure, noBills, noBills, noBills
+        ])
+        defer { session.invalidateAndCancel() }
+        let manager = controller(api)
+        try await manager.open(snCode: "one", name: "A", mac: "AA", session: auth)
+        try await manager.close(snCode: "one", session: auth)
+        await manager.refresh(session: auth)
+        XCTAssertNil(manager.latestSettlementYuan)
+    }
+
+    func testHistoricalPendingOrderQueriesItsOwnBillMonthBeforeCurrentMonth() async throws {
+        struct Pending: Encodable { let order: CloudActiveOrder; let createdAt: Date }
+        struct SavedFixture: Encodable {
+            let orders: [String: CloudActiveOrder] = [:]
+            let pending: [Pending]
+        }
+        let started = Date(timeIntervalSince1970: 1_735_689_600) // 2025-01-01, Asia/Shanghai
+        let order = CloudActiveOrder(snCode: "one", orderNo: "historical", deviceName: "fixture", deviceMac: "AA",
+            startedAt: started, autoDisConTime: 0, autoDisconnectAt: nil)
+        let defaults = preferences()
+        let identity = [auth.projectId, auth.accountId, auth.userId, auth.telephone]
+        let key = "cloud-original-orders." + Data(identity.map { "\($0.utf8.count):\($0)" }.joined().utf8).base64EncodedString()
+        defaults.set(try JSONEncoder().encode(SavedFixture(pending: [.init(order: order, createdAt: started.addingTimeInterval(60))])), forKey: key)
+        let unknown = Step(consume, json: ["success": true])
+        let bill = Step(bills, json: ["success": true, "data": [["consumeBillDTO": ["orderNo": "historical", "deviceSnCode": "one", "consumeMoney": "0.41"]]]], expectedMonth: "2025-01")
+        let (api, session) = fixture([unknown, unknown, bill])
+        defer { session.invalidateAndCancel() }
+        let manager = controller(api, defaults)
+        await manager.refresh(session: auth)
+        XCTAssertEqual(manager.settlementAmount(for: order), Decimal(string: "0.41"))
     }
 
     func testActivateImmediatelyRescopesAndLogoutClearsWithoutDeletingStoredOrders() async throws {
@@ -353,9 +412,11 @@ import XCTest
         CloudShowerController(api: api, defaults: defaults ?? preferences(), pause: { _ in try Task.checkCancellation() })
     }
     private struct Step {
-        let path: String; let json: [String: Any]; let failure: Error?
-        init(_ path: String, json: [String: Any]) { self.path = path; self.json = json; self.failure = nil }
-        init(_ path: String, failure: Error) { self.path = path; self.json = [:]; self.failure = failure }
+        let path: String; let json: [String: Any]; let failure: Error?; let expectedMonth: String?
+        init(_ path: String, json: [String: Any], expectedMonth: String? = nil) {
+            self.path = path; self.json = json; self.failure = nil; self.expectedMonth = expectedMonth
+        }
+        init(_ path: String, failure: Error) { self.path = path; self.json = [:]; self.failure = failure; self.expectedMonth = nil }
     }
     private func fixture(_ steps: [Step]) -> (QzxyAPI, URLSession) {
         let key = UUID().uuidString
@@ -365,6 +426,7 @@ import XCTest
                 XCTAssertEqual(request.httpMethod, step.path == "/order/query/account/bill/list" ? "GET" : "POST")
                 XCTAssertEqual(request.value(forHTTPHeaderField: "Config-Project"), "3")
                 let fields = try cloudFixtureFields(request)
+                if let month = step.expectedMonth { XCTAssertEqual(fields["month"], month) }
                 XCTAssertEqual(fields["loginCode"], "fixture-token")
                 XCTAssertEqual(fields["telephone"], "13800138000")
                 XCTAssertEqual(fields["userId"], "1")

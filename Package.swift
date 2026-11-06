@@ -8,7 +8,7 @@ let package = Package(
     targets: [
         .target(name: "LinYuCore", path: "LinYuIOS",
                 exclude: ["Info.plist", "LinYuIOS.entitlements", "Assets.xcassets", "Views", "Network", "Security", "Models", "BLE/BleCentral.swift", "Transactions/TransactionManager.swift", "Transactions/CloudShowerController.swift"],
-                sources: ["BLE/BleFrame.swift", "BLE/BleDeviceState.swift", "Transactions/WaterContracts.swift", "Transactions/LatencyTrace.swift", "Transactions/WaterTransactionEngine.swift"]),
+                sources: ["BLE/BleFrame.swift", "BLE/BleDeviceState.swift", "Transactions/WaterContracts.swift", "Transactions/LatencyTrace.swift", "Transactions/WaterTransactionEngine.swift", "Transactions/SettlementBillMatcher.swift"]),
         .testTarget(name: "LinYuCoreTests", dependencies: ["LinYuCore"], path: "CoreTests")
     ]
 )

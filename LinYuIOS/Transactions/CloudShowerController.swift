@@ -294,7 +294,7 @@ enum CloudShowerError: LocalizedError {
             let trace = OriginalLogs.shared.trace("cloud_settlement")
             trace.mark("bill_lookup")
             do {
-                if let amount = try await settle(orderNo: item.order.orderNo, order: item.order, session: session, key: key) {
+                if let amount = try await settle(orderNo: item.order.orderNo, order: item.order, closedAt: item.createdAt, session: session, key: key) {
                     latestSettlementYuan = amount
                     settlementYuanByOrder[settlementKey(item.order)] = amount
                 }
@@ -433,7 +433,10 @@ enum CloudShowerError: LocalizedError {
             if let string = value as? String { raw = string }
             else if let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() { raw = number.stringValue }
             else { return nil }
-            guard let decimal = Decimal(string: raw, locale: Locale(identifier: "en_US_POSIX")), !decimal.isNaN else { return nil }
+            // Decimal(string:) alone accepts a numeric prefix such as "40pending".
+            let cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let finite = Double(cleaned), finite.isFinite,
+                  let decimal = Decimal(string: cleaned, locale: Locale(identifier: "en_US_POSIX")), !decimal.isNaN else { return nil }
             return decimal / 1000
         }
         for scope in scopes {
@@ -452,7 +455,7 @@ enum CloudShowerError: LocalizedError {
         return nil
     }
 
-    private func settle(orderNo: String, order: CloudActiveOrder, session: QzxySession, key: String) async throws -> Decimal? {
+    private func settle(orderNo: String, order: CloudActiveOrder, closedAt: Date, session: QzxySession, key: String) async throws -> Decimal? {
         var sawZero = false
         if !orderNo.isEmpty {
             for attempt in 0..<2 {
@@ -472,26 +475,25 @@ enum CloudShowerError: LocalizedError {
         }
         var sawBill = false
         let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.dateFormat = "yyyy-MM"
+        formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
+        var months = [formatter.string(from: order.startedAt)]
+        let currentMonth = formatter.string(from: Date())
+        if months.first != currentMonth { months.append(currentMonth) }
         for attempt in 0..<3 {
+          for month in months {
             do {
                 let response = try await api.originalRequest("/order/query/account/bill/list",
-                    query: ["month": formatter.string(from: Date()), "billRequestType": "2"], session: session)
+                    query: ["month": month, "billRequestType": "2"], session: session)
                 try check(key)
-                if let bills = response.json["data"] as? [[String: Any]] {
+                if response.success, let bills = response.json["data"] as? [[String: Any]] {
                     let dtos = bills.compactMap { $0["consumeBillDTO"] as? [String: Any] }
-                    let exact = orderNo.isEmpty ? nil : (dtos.first { text($0["orderNo"]) == orderNo } ?? dtos.first { text($0["orderId"]) == orderNo })
-                    let time = DateFormatter(); time.locale = Locale(identifier: "en_US_POSIX"); time.dateFormat = "yyyy-MM-dd HH:mm:ss"
-                    let matched = exact ?? dtos.filter {
-                        // A newer order can be opened while this amount is being reconciled.
-                        // Keep the original date slack, but reject another identified order.
-                        if !orderNo.isEmpty, let number = text($0["orderNo"]), !number.isEmpty, number != orderNo { return false }
-                        guard let raw = text($0["consumeDate"]), let date = time.date(from: raw) else { return false }
-                        return date >= order.startedAt.addingTimeInterval(-180)
-                    }.max { (text($0["consumeDate"]) ?? "") < (text($1["consumeDate"]) ?? "") }
+                    let matched = SettlementBillMatcher.match(dtos, orderNo: orderNo, snCode: order.snCode,
+                        startedAt: order.startedAt, closedAt: closedAt)
                     if let matched {
                         sawBill = true
                         // Bill-list amounts already use yuan. Never divide them by 1000.
-                        if let raw = text(matched["consumeMoney"]), let value = Decimal(string: raw), value > 0 {
+                        if let raw = text(matched["consumeMoney"]), let finite = Double(raw), finite.isFinite,
+                           let value = Decimal(string: raw), value > 0 {
                             clearPending(order); return value
                         }
                     }
@@ -499,6 +501,7 @@ enum CloudShowerError: LocalizedError {
             } catch is CancellationError { throw CancellationError() }
             catch CloudShowerError.sessionChanged { throw CloudShowerError.sessionChanged }
             catch { }
+          }
             if attempt < 2 { try await pause(1_200_000_000); try check(key) }
         }
         // Keep both unknown and inferred zero in pending for subsequent reconciliation, as upstream does.
@@ -510,6 +513,8 @@ enum CloudShowerError: LocalizedError {
             let response = try await api.originalRequest("/order/consumeOrder/result/query",
                 post: ["snCode": snCode, "orderNo": orderNo], session: session)
             try check(key)
+            guard response.success,
+                  SettlementBillMatcher.responseMatches(response.data ?? response.json, orderNo: orderNo, snCode: snCode) else { return nil }
             return Self.consumeYuan(response)
         } catch is CancellationError { throw CancellationError() }
         catch CloudShowerError.sessionChanged { throw CloudShowerError.sessionChanged }

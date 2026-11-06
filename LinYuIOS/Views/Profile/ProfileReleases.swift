@@ -188,9 +188,13 @@ struct ProfileRepository: Decodable {
         OriginalGlassCard {
             VStack(alignment: .leading, spacing: 0) {
                 ProfileCardTitle("应用信息")
-                Text("当前版本 \(ProfileReleaseCatalog.referenceVersion)（Android 原版）")
+                Text("LinYu iOS \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "未知")（Build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "未知")）")
                     .font(LinYuType.font(13)).foregroundStyle(colors.textSecondary).padding(.top, 4)
-                Text(status.text).font(LinYuType.font(13, weight: .medium))
+                Link("iOS 更新与 IPA 下载", destination: URL(string: "https://github.com/CarpediemDyn/linyu-ios/releases")!)
+                    .font(LinYuType.font(13)).foregroundStyle(colors.accent).frame(minHeight: 44)
+                Text("Android 复刻基准：\(ProfileReleaseCatalog.referenceVersion)")
+                    .font(LinYuType.font(13)).foregroundStyle(colors.textSecondary)
+                Text("Android 原版：" + status.text).font(LinYuType.font(13, weight: .medium))
                     .foregroundStyle(status.color).padding(.top, 8)
                 if !catalog.releases.isEmpty { releaseHistory }
                 Button(action: catalog.check) {

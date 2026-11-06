@@ -47,6 +47,10 @@ enum LinYuWidgetStorage {
         parts.queryItems = [URLQueryItem(name: "id", value: id), URLQueryItem(name: "owner", value: snapshot.ownerScope), URLQueryItem(name: "nonce", value: snapshot.controlNonce)]
         return parts.url!
     }
+    /// Android's widget_root opens the app; only explicitly labelled control links operate valves.
+    static func bodyURL(snapshot: LinYuWidgetSnapshot) -> URL {
+        url(action: "show", id: snapshot.orders.first?.id ?? "", snapshot: snapshot)
+    }
     static func notificationURL(_ url: URL, actionIdentifier: String) -> URL? {
         var parts = URLComponents(url: url, resolvingAgainstBaseURL: false)
         parts?.host = actionIdentifier == "STOP_WATER" ? "stop" : "show"

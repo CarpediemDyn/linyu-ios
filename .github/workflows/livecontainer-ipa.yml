@@ -1,7 +1,17 @@
 name: Build LiveContainer IPA
+run-name: ${{ inputs.preflight_only && 'Release preflight (no IPA)' || 'Build LiveContainer IPA' }}
 on:
   workflow_dispatch:
     inputs:
+      preflight_only:
+        description: Run Ubuntu checks only; never allocate a Mac or generate an IPA
+        type: boolean
+        required: true
+        default: false
+      expected_sha:
+        description: Frozen release commit SHA (preflight must match)
+        type: string
+        required: true
       runner:
         description: Standard macOS build image
         type: choice
@@ -16,6 +26,9 @@ on:
         options: [iPhone, iPad]
 permissions:
   contents: read
+concurrency:
+  group: linyu-final-ipa
+  cancel-in-progress: false
 jobs:
   wait_for_service:
     name: Wait for GitHub Actions recovery
@@ -43,12 +56,36 @@ jobs:
           else:
               raise SystemExit('Recovery wait expired; no Mac build was started.')
           PY
-  build:
+  preflight:
     needs: wait_for_service
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify frozen source and release configuration
+        env:
+          EXPECTED_SOURCE_SHA: ${{ inputs.expected_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+          python3 scripts/release_preflight.py
+          git diff --check
+      - name: Packaging regression tests (including POSIX paths)
+        run: python3 -m unittest discover -s scripts/tests -v
+      - name: Mock transaction core and settlement isolation
+        run: |
+          swift --version
+          swift test
+  build:
+    if: ${{ !inputs.preflight_only }}
+    needs: [wait_for_service, preflight]
     runs-on: ${{ inputs.runner || 'macos-26-intel' }}
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
+      - name: Verify frozen source
+        env:
+          EXPECTED_SOURCE_SHA: ${{ inputs.expected_sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
       - name: Toolchain
         run: |
           xcodebuild -version

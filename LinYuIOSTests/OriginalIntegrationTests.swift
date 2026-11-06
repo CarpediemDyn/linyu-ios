@@ -90,6 +90,18 @@ import UIKit
         XCTAssertNotEqual(field("nonce", oldURL), field("nonce", currentURL))
     }
 
+    func testWidgetBodyOnlyOpensAppAndExplicitControlsKeepTheirActions() {
+        var snapshot = LinYuWidgetSnapshot(); snapshot.ownerScope = "fixture-owner"
+        snapshot.lastDeviceID = "meter"
+        XCTAssertEqual(LinYuWidgetStorage.bodyURL(snapshot: snapshot).host, "show")
+        snapshot.orders = [.init(id: "order", title: "fixture", startedAt: .now, isBluetooth: true)]
+        let body = LinYuWidgetStorage.bodyURL(snapshot: snapshot)
+        XCTAssertEqual(body.host, "show")
+        XCTAssertEqual(URLComponents(url: body, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "id" }?.value, "order")
+        XCTAssertEqual(LinYuWidgetStorage.url(action: "stop", id: "order", snapshot: snapshot).host, "stop")
+        XCTAssertEqual(LinYuWidgetStorage.url(action: "start", id: "meter", snapshot: snapshot).host, "start")
+    }
+
     func testOriginalCardMigrationKeepsOneFunctionalSlotPerCard() async throws {
         let name = "linyu-test-" + UUID().uuidString
         let defaults = UserDefaults(suiteName: name)!
