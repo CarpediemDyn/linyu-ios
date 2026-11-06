@@ -57,6 +57,18 @@ final class LoginVisualTests: XCTestCase {
             let login = enterCredentials(in: app)
             login.tap()
             XCTAssertTrue(app.descendants(matching: .any)["linyu.home"].firstMatch.waitForExistence(timeout: 8))
+            if scenario == "ordinary" {
+                capture(app, "responsive-home-simulator")
+                app.buttons["linyu.tab.1"].tap()
+                XCTAssertTrue(app.staticTexts["账单"].firstMatch.exists)
+                capture(app, "responsive-wallet-simulator")
+                app.buttons["linyu.tab.2"].tap()
+                let settings = app.buttons["打开设置"]
+                XCTAssertTrue(settings.waitForExistence(timeout: 5))
+                settings.tap()
+                XCTAssertTrue(app.staticTexts["设置"].firstMatch.exists)
+                capture(app, "responsive-settings-simulator")
+            }
             app.terminate()
         }
     }

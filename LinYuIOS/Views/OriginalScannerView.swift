@@ -27,14 +27,16 @@ import UIKit
                     ScannerCamera(torch: torch, onCode: match, onError: { _ in cameraFailed = true }, onReady: { hasTorch = $0 })
                         .id(cameraGeneration).ignoresSafeArea()
                     VStack(spacing: 0) {
-                        header.padding(.top, 4)
+                        header.padding(.top, 4).frame(maxWidth: 620)
+                            .frame(maxWidth: .infinity).background(.black.opacity(0.55))
                         GeometryReader { space in
                             OriginalScannerOverlay(size: space.size)
                         }
                         controls(compact: geometry.size.height < 460)
-                            .padding(.bottom, geometry.size.height < 460 ? 6 : 24)
+                            .padding(.vertical, geometry.size.height < 460 ? 6 : 12)
+                            .frame(maxWidth: 620).frame(maxWidth: .infinity)
+                            .background(.black.opacity(0.55))
                     }
-                    .frame(maxWidth: 620)
                 } else {
                     ScrollView {
                         notice.frame(minHeight: geometry.size.height)
@@ -191,7 +193,10 @@ private struct ScannerCamera: UIViewRepresentable {
         let view = ScannerPreview(); view.preview.session = context.coordinator.session
         view.preview.videoGravity = .resizeAspectFill; context.coordinator.start(); return view
     }
-    func updateUIView(_ view: ScannerPreview, context: Context) { context.coordinator.setTorch(torch) }
+    func updateUIView(_ view: ScannerPreview, context: Context) {
+        view.setNeedsLayout()
+        context.coordinator.setTorch(torch)
+    }
     static func dismantleUIView(_ view: ScannerPreview, coordinator: Coordinator) { coordinator.stop() }
     final class Coordinator: NSObject, AVCaptureMetadataOutputObjectsDelegate {
         let session = AVCaptureSession()
@@ -238,4 +243,12 @@ private struct ScannerCamera: UIViewRepresentable {
 private final class ScannerPreview: UIView {
     override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
     var preview: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard let connection = preview.connection, connection.isVideoOrientationSupported,
+              let interface = window?.windowScene?.interfaceOrientation,
+              let orientation = AVCaptureVideoOrientation(rawValue: interface.rawValue) else { return }
+        if connection.videoOrientation != orientation { connection.videoOrientation = orientation }
+    }
 }

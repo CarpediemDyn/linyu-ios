@@ -5,6 +5,7 @@ import SwiftUI
     @ObservedObject var preferences: OriginalPreferences
     let onBack: () -> Void
     @Environment(\.linYuColors) private var colors
+    @Environment(\.linYuWindow) private var window
     @AppStorage("backgroundScope") private var savedScope = "home"
     @State private var selection: PhotosPickerItem?
     @State private var confirmReset = false
@@ -42,7 +43,8 @@ import SwiftUI
                 .padding(.top, 24)
                 Spacer(minLength: 60)
             }
-            .padding(20)
+            .padding(window.pageMargin)
+            .frame(maxWidth: 680).frame(maxWidth: .infinity)
         }
         .background(colors.solidSurface.ignoresSafeArea())
         .linYuModal(isPresented: $confirmReset) { resetDialog }

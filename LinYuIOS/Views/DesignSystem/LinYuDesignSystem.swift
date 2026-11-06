@@ -92,9 +92,10 @@ struct LinYuButtonStyle: ButtonStyle {
     var color: Color? = nil
     var cornerRadius: CGFloat = 16
     var height: CGFloat = 44
+    @ScaledMetric(relativeTo: .body) private var labelSize: CGFloat = 14
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label.font(LinYuType.font(14, weight: .medium))
-            .padding(.horizontal, 24).frame(minHeight: height)
+        configuration.label.font(LinYuType.font(labelSize, weight: .medium))
+            .multilineTextAlignment(.center).padding(.horizontal, 20).frame(minHeight: height)
             .foregroundStyle(colors.isDark && color == nil ? Color(linYuHex: 0x062E6F) : .white)
             .background((color ?? colors.accent).opacity(enabled ? 1 : 0.38), in: RoundedRectangle(cornerRadius: cornerRadius))
             .scaleEffect(configuration.isPressed ? 0.97 : 1)

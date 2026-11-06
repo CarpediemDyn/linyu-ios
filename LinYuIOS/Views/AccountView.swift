@@ -23,11 +23,11 @@ import SwiftUI
             let window = LinYuWindowLayout(size: geometry.size)
             ZStack {
                 ZStack(alignment: .topLeading) {
-                LinearGradient(colors: [blue, Color(linYuHex: 0x0D47A1), Color(linYuHex: 0x051D40)], startPoint: .top, endPoint: .bottom)
-                Circle().fill(.white.opacity(0.04)).frame(width: 280, height: 280).offset(x: -120, y: -80)
-                Circle().fill(.white.opacity(0.06)).frame(width: 180, height: 180)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                    .offset(x: 60, y: 60)
+                    LinearGradient(colors: [blue, Color(linYuHex: 0x0D47A1), Color(linYuHex: 0x051D40)], startPoint: .top, endPoint: .bottom)
+                    Circle().fill(.white.opacity(0.04)).frame(width: 280, height: 280).offset(x: -120, y: -80)
+                    Circle().fill(.white.opacity(0.06)).frame(width: 180, height: 180)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                        .offset(x: 60, y: 60)
                 }.ignoresSafeArea(.container).allowsHitTesting(false).accessibilityHidden(true)
                 ScrollView {
                     VStack(spacing: 0) {
@@ -40,6 +40,8 @@ import SwiftUI
                     .padding(.top, window.short ? 12 : 24).padding(.bottom, 28)
                     .frame(maxWidth: 510).frame(maxWidth: .infinity)
                     .scaleEffect(appeared ? 1 : 0.8, anchor: .top)
+                    .frame(minHeight: geometry.size.height,
+                           alignment: window.size.width >= 600 && !window.short ? .center : .top)
                 }.scrollDismissesKeyboard(.interactively)
             }
         }.preferredColorScheme(.light)
